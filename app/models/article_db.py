@@ -19,6 +19,8 @@ class ArticleDB(Base):
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     category: Mapped[str | None] = mapped_column(String, nullable=True)
     topics: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    key_points: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

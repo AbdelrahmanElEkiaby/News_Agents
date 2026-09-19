@@ -33,9 +33,17 @@ This project is being built one phase at a time.
 - Stores `category` and `topics` in PostgreSQL
 - Skips duplicate URLs so old articles are not classified again
 
+## Phase 4 Features
+
+- OpenAI article summarization for newly saved articles
+- Short summaries in the article language
+- Key points stored with each article
+- Skips duplicate URLs so old articles are not summarized again
+- Basic article content extraction using `httpx` and BeautifulSoup
+- Updates missing content on duplicate articles when the same URL is fetched again
+
 ## Current News Sources
 
-- Hacker News API
 - Al Jazeera Arabic RSS
 - BBC News RSS
 
@@ -55,10 +63,12 @@ News_Agents/
 |   |-- services/
 |   |   |-- __init__.py
 |   |   |-- article_classification.py
+|   |   |-- article_summarization.py
 |   |   |-- article_storage.py
 |   |   `-- news_collection.py
 |   `-- sources/
 |       |-- __init__.py
+|       |-- article_content.py
 |       |-- hacker_news.py
 |       |-- rss.py
 |       `-- rss_sources.py
@@ -124,10 +134,12 @@ Expected response:
 
 ```json
 {
-  "fetched": 30,
-  "saved": 17,
-  "duplicates": 13,
-  "classified": 17
+  "fetched": 20,
+  "saved": 5,
+  "duplicates": 15,
+  "content_updated": 10,
+  "classified": 5,
+  "summarized": 5
 }
 ```
 
@@ -151,7 +163,10 @@ Saved articles now include classification fields:
   "title": "Example news title",
   "source": "BBC News",
   "language": "en",
+  "content": "Extracted article text...",
   "category": "world",
-  "topics": ["middle east", "diplomacy"]
+  "topics": ["middle east", "diplomacy"],
+  "summary": "A short summary of the article.",
+  "key_points": ["First key point", "Second key point"]
 }
 ```

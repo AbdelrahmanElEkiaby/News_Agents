@@ -49,6 +49,8 @@ def add_missing_article_columns() -> None:
     with get_engine().begin() as connection:
         connection.execute(text("ALTER TABLE articles ADD COLUMN IF NOT EXISTS category VARCHAR"))
         connection.execute(text("ALTER TABLE articles ADD COLUMN IF NOT EXISTS topics JSON"))
+        connection.execute(text("ALTER TABLE articles ADD COLUMN IF NOT EXISTS summary TEXT"))
+        connection.execute(text("ALTER TABLE articles ADD COLUMN IF NOT EXISTS key_points JSON"))
 
 
 def get_db() -> Generator[Session, None, None]:

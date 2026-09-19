@@ -33,6 +33,8 @@ class ArticleRead(Article):
     id: int
     category: str | None = None
     topics: list[str] | None = None
+    summary: str | None = None
+    key_points: list[str] | None = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -42,10 +44,17 @@ class ArticleFetchResult(BaseModel):
     fetched: int
     saved: int
     duplicates: int
+    content_updated: int
     classified: int
+    summarized: int
 
 
 class ArticleClassification(BaseModel):
     language: str
     category: ArticleCategory
     topics: list[str]
+
+
+class ArticleSummary(BaseModel):
+    summary: str
+    key_points: list[str]

@@ -6,3 +6,4 @@ feedparser
 sqlalchemy
 psycopg[binary]
 openai
+beautifulsoup4

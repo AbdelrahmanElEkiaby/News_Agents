@@ -9,8 +9,10 @@ from app.services.article_storage import (
     get_article_by_id,
     get_articles,
     save_article_classification,
+    save_article_summary,
     save_new_articles,
 )
+from app.services.article_summarization import summarize_article
 from app.services.news_collection import fetch_all_articles
 
 app = FastAPI(title="News Agent API")
@@ -33,24 +35,35 @@ async def fetch_and_save_articles(db: Session = Depends(get_db)):
     stats, saved_articles = save_new_articles(db, articles)
 
     classified_count = 0
+    summarized_count = 0
 
     for article in saved_articles:
         classification = await classify_article(article)
 
-        if classification is None:
-            continue
+        if classification is not None:
+            save_article_classification(
+                db=db,
+                article=article,
+                category=classification.category,
+                topics=classification.topics,
+            )
+            classified_count += 1
 
-        save_article_classification(
-            db=db,
-            article=article,
-            category=classification.category,
-            topics=classification.topics,
-        )
-        classified_count += 1
+        summary = await summarize_article(article)
+
+        if summary is not None:
+            save_article_summary(
+                db=db,
+                article=article,
+                summary=summary.summary,
+                key_points=summary.key_points,
+            )
+            summarized_count += 1
 
     return {
         **stats,
         "classified": classified_count,
+        "summarized": summarized_count,
     }
 
 

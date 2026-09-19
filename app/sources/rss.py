@@ -6,6 +6,7 @@ import feedparser
 import httpx
 
 from app.models.article import Article
+from app.sources.article_content import extract_text_from_feed_html, fetch_article_content
 
 logger = logging.getLogger(__name__)
 
@@ -19,23 +20,32 @@ async def fetch_rss_articles(
     articles: list[Article] = []
 
     try:
-        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+        async with httpx.AsyncClient(
+            timeout=10.0,
+            follow_redirects=True,
+            headers={"User-Agent": "NewsAgentLearningProject/1.0"},
+        ) as client:
             response = await client.get(feed_url)
             response.raise_for_status()
+
+            parsed_feed = feedparser.parse(response.content)
+
+            if parsed_feed.bozo:
+                logger.warning("RSS feed from %s may be malformed", source_name)
+
+            for entry in parsed_feed.entries[:limit]:
+                article = parse_rss_entry(entry, source_name, language)
+
+                if article is None:
+                    continue
+
+                if article.content is None:
+                    article.content = await fetch_article_content(client, article.url)
+
+                articles.append(article)
     except httpx.HTTPError as error:
         logger.warning("Could not fetch RSS feed from %s: %s", source_name, error)
         return articles
-
-    parsed_feed = feedparser.parse(response.content)
-
-    if parsed_feed.bozo:
-        logger.warning("RSS feed from %s may be malformed", source_name)
-
-    for entry in parsed_feed.entries[:limit]:
-        article = parse_rss_entry(entry, source_name, language)
-
-        if article is not None:
-            articles.append(article)
 
     return articles
 
@@ -50,6 +60,7 @@ def parse_rss_entry(entry, source_name: str, language: str) -> Article | None:
             return None
 
         description = clean_text(entry.get("summary") or entry.get("description") or "")
+        content = parse_entry_content(entry)
         published_at = parse_rss_date(entry)
 
         return Article(
@@ -58,7 +69,7 @@ def parse_rss_entry(entry, source_name: str, language: str) -> Article | None:
             source=source_name,
             language=language,
             description=description or None,
-            content=None,
+            content=content,
             published_at=published_at,
         )
     except Exception as error:
@@ -74,6 +85,21 @@ def parse_rss_date(entry) -> datetime | None:
 
     timestamp = calendar.timegm(published_time)
     return datetime.fromtimestamp(timestamp, tz=timezone.utc)
+
+
+def parse_entry_content(entry) -> str | None:
+    entry_content = entry.get("content")
+
+    if not entry_content:
+        return None
+
+    first_content_item = entry_content[0]
+    html = first_content_item.get("value", "")
+
+    if not html:
+        return None
+
+    return extract_text_from_feed_html(html)
 
 
 def clean_text(value: str) -> str:
