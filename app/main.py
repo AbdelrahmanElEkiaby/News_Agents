@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import Depends, FastAPI, HTTPException
 from sqlalchemy.orm import Session
 
@@ -5,17 +7,12 @@ from app.config import settings
 from app.database import create_database_tables, get_db
 from app.models.article import ArticleFetchResult, ArticleRead
 from app.models.feed import FeedArticle, FeedRequest
-from app.services.article_classification import classify_article
-from app.services.article_storage import (
-    get_article_by_id,
-    get_articles,
-    save_article_classification,
-    save_article_summary,
-    save_new_articles,
-)
-from app.services.article_summarization import summarize_article
-from app.services.news_collection import fetch_all_articles
+from app.services.article_storage import get_article_by_id, get_articles
+from app.services.pipeline import run_news_pipeline
 from app.services.relevance import build_personalized_feed
+from app.services.scheduler import start_scheduler, stop_scheduler
+
+logging.basicConfig(level=logging.INFO)
 
 app = FastAPI(title="News Agent API")
 app.state.settings = settings
@@ -24,6 +21,12 @@ app.state.settings = settings
 @app.on_event("startup")
 def startup():
     create_database_tables()
+    app.state.scheduler = start_scheduler()
+
+
+@app.on_event("shutdown")
+def shutdown():
+    stop_scheduler()
 
 
 @app.get("/")
@@ -33,40 +36,7 @@ async def read_root():
 
 @app.post("/articles/fetch", response_model=ArticleFetchResult)
 async def fetch_and_save_articles(db: Session = Depends(get_db)):
-    articles = await fetch_all_articles()
-    stats, saved_articles = save_new_articles(db, articles)
-
-    classified_count = 0
-    summarized_count = 0
-
-    for article in saved_articles:
-        classification = await classify_article(article)
-
-        if classification is not None:
-            save_article_classification(
-                db=db,
-                article=article,
-                category=classification.category,
-                topics=classification.topics,
-            )
-            classified_count += 1
-
-        summary = await summarize_article(article)
-
-        if summary is not None:
-            save_article_summary(
-                db=db,
-                article=article,
-                summary=summary.summary,
-                key_points=summary.key_points,
-            )
-            summarized_count += 1
-
-    return {
-        **stats,
-        "classified": classified_count,
-        "summarized": summarized_count,
-    }
+    return await run_news_pipeline(db)
 
 
 @app.get("/articles", response_model=list[ArticleRead])

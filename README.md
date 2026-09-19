@@ -57,6 +57,13 @@ This project is being built one phase at a time.
 - Returns articles ordered by final score
 - Limits each request to a small number of articles to control OpenAI cost
 
+## Phase 7 Features
+
+- Background scheduler for the news pipeline
+- Fetch interval controlled by `NEWS_FETCH_INTERVAL_MINUTES`
+- Uses the same pipeline as `POST /articles/fetch`
+- Logs fetch, save, duplicate, classification, and summarization counts
+
 ## Current News Sources
 
 - Al Jazeera Arabic RSS
@@ -83,6 +90,8 @@ News_Agents/
 |   |   |-- article_summarization.py
 |   |   |-- article_storage.py
 |   |   |-- news_collection.py
+|   |   |-- pipeline.py
+|   |   |-- scheduler.py
 |   |   `-- relevance.py
 |   `-- sources/
 |       |-- __init__.py
@@ -104,6 +113,7 @@ Create a `.env` file using `.env.example` as a guide:
 OPENAI_API_KEY=
 OPENAI_MODEL=gpt-5-nano
 DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5433/news_agents
+NEWS_FETCH_INTERVAL_MINUTES=30
 ```
 
 ## Setup
@@ -147,6 +157,8 @@ Expected response:
 ```bash
 curl -X POST http://127.0.0.1:8000/articles/fetch
 ```
+
+The same pipeline also runs automatically in the background based on `NEWS_FETCH_INTERVAL_MINUTES`.
 
 Expected response:
 
