@@ -4,10 +4,11 @@ from app.models.article import Article
 from app.models.article_db import ArticleDB
 
 
-def save_new_articles(db: Session, articles: list[Article]) -> dict[str, int]:
+def save_new_articles(db: Session, articles: list[Article]) -> tuple[dict[str, int], list[ArticleDB]]:
     saved_count = 0
     duplicate_count = 0
     saved_urls: set[str] = set()
+    saved_articles: list[ArticleDB] = []
 
     for article in articles:
         if article.url in saved_urls:
@@ -22,16 +23,27 @@ def save_new_articles(db: Session, articles: list[Article]) -> dict[str, int]:
 
         db_article = ArticleDB(**article.model_dump())
         db.add(db_article)
+        db.flush()
+        saved_articles.append(db_article)
         saved_urls.add(article.url)
         saved_count += 1
 
     db.commit()
 
-    return {
+    stats = {
         "fetched": len(articles),
         "saved": saved_count,
         "duplicates": duplicate_count,
     }
+
+    return stats, saved_articles
+
+
+def save_article_classification(db: Session, article: ArticleDB, category: str, topics: list[str]) -> None:
+    article.category = category
+    article.topics = topics
+    db.commit()
+    db.refresh(article)
 
 
 def get_articles(db: Session) -> list[ArticleDB]:

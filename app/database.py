@@ -1,6 +1,6 @@
 from collections.abc import Generator
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
@@ -42,6 +42,13 @@ def create_database_tables() -> None:
     import app.models.article_db
 
     Base.metadata.create_all(bind=get_engine())
+    add_missing_article_columns()
+
+
+def add_missing_article_columns() -> None:
+    with get_engine().begin() as connection:
+        connection.execute(text("ALTER TABLE articles ADD COLUMN IF NOT EXISTS category VARCHAR"))
+        connection.execute(text("ALTER TABLE articles ADD COLUMN IF NOT EXISTS topics JSON"))
 
 
 def get_db() -> Generator[Session, None, None]:

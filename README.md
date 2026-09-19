@@ -26,6 +26,13 @@ This project is being built one phase at a time.
 - `GET /articles` to list saved articles
 - `GET /articles/{id}` to read one saved article
 
+## Phase 3 Features
+
+- OpenAI article classification for newly saved articles
+- Structured output using a Pydantic model
+- Stores `category` and `topics` in PostgreSQL
+- Skips duplicate URLs so old articles are not classified again
+
 ## Current News Sources
 
 - Hacker News API
@@ -47,6 +54,7 @@ News_Agents/
 |   |   `-- article_db.py
 |   |-- services/
 |   |   |-- __init__.py
+|   |   |-- article_classification.py
 |   |   |-- article_storage.py
 |   |   `-- news_collection.py
 |   `-- sources/
@@ -118,7 +126,8 @@ Expected response:
 {
   "fetched": 30,
   "saved": 17,
-  "duplicates": 13
+  "duplicates": 13,
+  "classified": 17
 }
 ```
 
@@ -132,4 +141,17 @@ http://127.0.0.1:8000/articles
 
 ```text
 http://127.0.0.1:8000/articles/1
+```
+
+Saved articles now include classification fields:
+
+```json
+{
+  "id": 1,
+  "title": "Example news title",
+  "source": "BBC News",
+  "language": "en",
+  "category": "world",
+  "topics": ["middle east", "diplomacy"]
+}
 ```
