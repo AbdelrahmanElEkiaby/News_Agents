@@ -42,6 +42,21 @@ This project is being built one phase at a time.
 - Basic article content extraction using `httpx` and BeautifulSoup
 - Updates missing content on duplicate articles when the same URL is fetched again
 
+## Phase 5 Features
+
+- Preferences are represented as a simple request model
+- Preferences are not stored in PostgreSQL yet
+- Future relevance endpoints can receive topics and languages directly in the API request
+- No authentication yet
+
+## Phase 6 Features
+
+- `POST /feed` accepts preferences directly in the request body
+- Calculates AI relevance for saved articles
+- Adds deterministic freshness and topic-match scores
+- Returns articles ordered by final score
+- Limits each request to a small number of articles to control OpenAI cost
+
 ## Current News Sources
 
 - Al Jazeera Arabic RSS
@@ -59,13 +74,16 @@ News_Agents/
 |   |-- models/
 |   |   |-- __init__.py
 |   |   |-- article.py
-|   |   `-- article_db.py
+|   |   |-- article_db.py
+|   |   |-- feed.py
+|   |   `-- preference.py
 |   |-- services/
 |   |   |-- __init__.py
 |   |   |-- article_classification.py
 |   |   |-- article_summarization.py
 |   |   |-- article_storage.py
-|   |   `-- news_collection.py
+|   |   |-- news_collection.py
+|   |   `-- relevance.py
 |   `-- sources/
 |       |-- __init__.py
 |       |-- article_content.py
@@ -169,4 +187,42 @@ Saved articles now include classification fields:
   "summary": "A short summary of the article.",
   "key_points": ["First key point", "Second key point"]
 }
+```
+
+## Preferences Shape
+
+Preferences are not saved yet. Later relevance endpoints can accept this shape directly:
+
+```json
+{
+  "topics": ["artificial intelligence", "technology", "middle east"],
+  "languages": ["ar", "en"]
+}
+```
+
+## Personalized Feed
+
+```bash
+curl -X POST http://127.0.0.1:8000/feed \
+  -H "Content-Type: application/json" \
+  -d "{\"topics\": [\"ai\", \"technology\", \"middle east\"], \"languages\": [\"ar\", \"en\"], \"max_articles\": 10}"
+```
+
+Expected response:
+
+```json
+[
+  {
+    "id": 1,
+    "title": "Example article",
+    "summary": "Short summary...",
+    "category": "ai",
+    "topics": ["artificial intelligence"],
+    "score": 0.91,
+    "ai_relevance": 0.9,
+    "freshness_score": 1.0,
+    "topic_match_score": 0.8,
+    "reason": "The article matches the reader's AI interests."
+  }
+]
 ```

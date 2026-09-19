@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import create_database_tables, get_db
 from app.models.article import ArticleFetchResult, ArticleRead
+from app.models.feed import FeedArticle, FeedRequest
 from app.services.article_classification import classify_article
 from app.services.article_storage import (
     get_article_by_id,
@@ -14,6 +15,7 @@ from app.services.article_storage import (
 )
 from app.services.article_summarization import summarize_article
 from app.services.news_collection import fetch_all_articles
+from app.services.relevance import build_personalized_feed
 
 app = FastAPI(title="News Agent API")
 app.state.settings = settings
@@ -80,3 +82,13 @@ def read_article(article_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Article not found")
 
     return article
+
+
+@app.post("/feed", response_model=list[FeedArticle])
+async def read_feed(feed_request: FeedRequest, db: Session = Depends(get_db)):
+    articles = get_articles(db)
+    return await build_personalized_feed(
+        articles=articles,
+        preferences=feed_request,
+        max_articles=feed_request.max_articles,
+    )
