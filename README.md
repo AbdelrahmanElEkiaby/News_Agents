@@ -64,6 +64,14 @@ This project is being built one phase at a time.
 - Uses the same pipeline as `POST /articles/fetch`
 - Logs fetch, save, duplicate, classification, and summarization counts
 
+## Phase 8 Features
+
+- React and TypeScript frontend
+- Feed ranking screen
+- Preference controls for topics, languages, and article count
+- Article details panel with summary, ranking scores, topics, and original link
+- Uses normal React hooks and `fetch`
+
 ## Current News Sources
 
 - Al Jazeera Arabic RSS
@@ -101,6 +109,16 @@ News_Agents/
 |       `-- rss_sources.py
 |-- .env.example
 |-- docker-compose.yml
+|-- frontend/
+|   |-- src/
+|   |   |-- api.ts
+|   |   |-- main.tsx
+|   |   |-- styles.css
+|   |   `-- vite-env.d.ts
+|   |-- index.html
+|   |-- package.json
+|   |-- tsconfig.json
+|   `-- vite.config.ts
 |-- requirements.txt
 `-- README.md
 ```
@@ -237,4 +255,32 @@ Expected response:
     "reason": "The article matches the reader's AI interests."
   }
 ]
+```
+
+## Run The Frontend
+
+Start the backend first:
+
+```bash
+uvicorn app.main:app --reload
+```
+
+Then start the frontend:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open:
+
+```text
+http://127.0.0.1:5173
+```
+
+The frontend calls the backend at:
+
+```text
+http://127.0.0.1:8000
 ```
