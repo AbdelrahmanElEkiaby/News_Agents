@@ -72,6 +72,14 @@ This project is being built one phase at a time.
 - Article details panel with summary, ranking scores, topics, and original link
 - Uses normal React hooks and `fetch`
 
+## Dynamic Sources Refactor 
+
+- Added a `sources` table
+- Seeded the current hardcoded RSS sources into PostgreSQL
+- Added source CRUD endpoints
+- `DELETE /sources/{id}` safely disables a source by setting `is_active = false`
+- Existing hardcoded ingestion still works and has not been removed yet
+
 ## Current News Sources
 
 - Al Jazeera Arabic RSS
@@ -91,7 +99,9 @@ News_Agents/
 |   |   |-- article.py
 |   |   |-- article_db.py
 |   |   |-- feed.py
-|   |   `-- preference.py
+|   |   |-- preference.py
+|   |   |-- source.py
+|   |   `-- source_db.py
 |   |-- services/
 |   |   |-- __init__.py
 |   |   |-- article_classification.py
@@ -100,7 +110,8 @@ News_Agents/
 |   |   |-- news_collection.py
 |   |   |-- pipeline.py
 |   |   |-- scheduler.py
-|   |   `-- relevance.py
+|   |   |-- relevance.py
+|   |   `-- source_storage.py
 |   `-- sources/
 |       |-- __init__.py
 |       |-- article_content.py
@@ -283,4 +294,38 @@ The frontend calls the backend at:
 
 ```text
 http://127.0.0.1:8000
+```
+
+## Source Management API
+
+List sources:
+
+```text
+GET /sources
+```
+
+Read one source:
+
+```text
+GET /sources/1
+```
+
+Create a source:
+
+```bash
+curl -X POST http://127.0.0.1:8000/sources \
+  -H "Content-Type: application/json" \
+  -d "{\"name\": \"BBC News\", \"website_url\": \"https://www.bbc.com\", \"feed_url\": \"https://feeds.bbci.co.uk/news/rss.xml\", \"language\": \"en\", \"source_type\": \"rss\"}"
+```
+
+Update a source:
+
+```text
+PATCH /sources/1
+```
+
+Disable a source:
+
+```text
+DELETE /sources/1
 ```

@@ -40,6 +40,7 @@ def get_session_local() -> sessionmaker[Session]:
 
 def create_database_tables() -> None:
     import app.models.article_db
+    import app.models.source_db
 
     Base.metadata.create_all(bind=get_engine())
     add_missing_article_columns()
