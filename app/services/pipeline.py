@@ -1,20 +1,25 @@
+import asyncio
 import logging
 
 from sqlalchemy.orm import Session
 
-from app.services.article_classification import classify_article
+from app.config import settings
+from app.database import get_session_local
+from app.services.article_analysis import analyze_articles
 from app.services.article_storage import (
-    save_article_classification,
-    save_article_summary,
+    get_articles_missing_analysis,
+    save_article_analyses,
+    save_article_contents,
     save_new_articles,
 )
-from app.services.article_summarization import summarize_article
 from app.services.news_collection import fetch_all_articles
+from app.sources.article_content import fetch_article_contents
 
 logger = logging.getLogger(__name__)
+analysis_lock = asyncio.Lock()
 
 
-async def run_news_pipeline(db: Session) -> dict[str, int]:
+async def run_news_pipeline(db: Session, process_ai: bool = True) -> dict[str, int | bool]:
     logger.info("Fetching articles...")
     articles = await fetch_all_articles(db)
     logger.info("%s articles received.", len(articles))
@@ -23,31 +28,18 @@ async def run_news_pipeline(db: Session) -> dict[str, int]:
     logger.info("%s new articles saved.", stats["saved"])
     logger.info("%s duplicate articles skipped.", stats["duplicates"])
 
+    articles_needing_content = [article for article in saved_articles if not article.content]
+    contents = await fetch_article_contents(articles_needing_content)
+    content_updated_count = save_article_contents(db, contents)
+    stats["content_updated"] += content_updated_count
+    logger.info("%s article bodies downloaded.", content_updated_count)
+
     classified_count = 0
     summarized_count = 0
 
-    for article in saved_articles:
-        classification = await classify_article(article)
-
-        if classification is not None:
-            save_article_classification(
-                db=db,
-                article=article,
-                category=classification.category,
-                topics=classification.topics,
-            )
-            classified_count += 1
-
-        summary = await summarize_article(article)
-
-        if summary is not None:
-            save_article_summary(
-                db=db,
-                article=article,
-                summary=summary.summary,
-                key_points=summary.key_points,
-            )
-            summarized_count += 1
+    if process_ai:
+        async with analysis_lock:
+            classified_count, summarized_count = await process_missing_articles(db)
 
     logger.info("%s articles classified.", classified_count)
     logger.info("%s articles summarized.", summarized_count)
@@ -57,4 +49,33 @@ async def run_news_pipeline(db: Session) -> dict[str, int]:
         **stats,
         "classified": classified_count,
         "summarized": summarized_count,
+        "ai_processing_started": False,
     }
+
+
+async def process_missing_articles(db: Session, limit: int = 100) -> tuple[int, int]:
+    articles = get_articles_missing_analysis(db, limit=limit)
+    logger.info("%s articles are waiting for AI analysis.", len(articles))
+
+    analyses = await analyze_articles(articles)
+    counts = save_article_analyses(db, analyses)
+    logger.info("AI analysis completed for %s articles.", len(analyses))
+    return counts
+
+
+async def process_missing_articles_in_background(limit: int = 100) -> None:
+    if not settings.openai_api_key:
+        logger.warning("Background article analysis skipped: OPENAI_API_KEY is not set")
+        return
+
+    async with analysis_lock:
+        session_local = get_session_local()
+        db = session_local()
+
+        try:
+            await process_missing_articles(db, limit=limit)
+        except Exception as error:
+            db.rollback()
+            logger.exception("Background article analysis failed: %s", error)
+        finally:
+            db.close()

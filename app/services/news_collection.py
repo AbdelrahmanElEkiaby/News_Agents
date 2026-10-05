@@ -1,3 +1,4 @@
+import asyncio
 import logging
 
 from sqlalchemy.orm import Session
@@ -22,15 +23,20 @@ async def fetch_all_articles(db: Session) -> list[Article]:
         logger.info("Fetching %s...", source.name)
         mark_source_fetch_started(db, source)
 
-        try:
-            source_articles = await fetch_source(source)
-        except Exception as error:
+    results = await asyncio.gather(
+        *(fetch_source(source) for source in sources),
+        return_exceptions=True,
+    )
+
+    for source, result in zip(sources, results, strict=True):
+        if isinstance(result, BaseException):
+            error = result
             logger.warning("Unable to fetch %s: %s", source.name, error)
             mark_source_fetch_error(db, source, error)
             continue
 
-        articles.extend(source_articles)
+        articles.extend(result)
         mark_source_fetch_success(db, source)
-        logger.info("%s articles received from %s.", len(source_articles), source.name)
+        logger.info("%s articles received from %s.", len(result), source.name)
 
     return articles

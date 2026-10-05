@@ -7,7 +7,7 @@ import httpx
 
 from app.models.article import Article
 from app.models.source_db import SourceDB
-from app.sources.article_content import extract_text_from_feed_html, fetch_article_content
+from app.sources.article_content import extract_text_from_feed_html
 
 logger = logging.getLogger(__name__)
 
@@ -32,33 +32,32 @@ async def fetch_rss_articles(
 ) -> list[Article]:
     articles: list[Article] = []
 
-    try:
-        async with httpx.AsyncClient(
-            timeout=10.0,
-            follow_redirects=True,
-            headers={"User-Agent": "NewsAgentLearningProject/1.0"},
-        ) as client:
-            response = await client.get(feed_url)
-            response.raise_for_status()
+    async with httpx.AsyncClient(
+        timeout=10.0,
+        follow_redirects=True,
+        headers={"User-Agent": "NewsAgentLearningProject/1.0"},
+    ) as client:
+        response = await client.get(feed_url)
+        response.raise_for_status()
 
-            parsed_feed = feedparser.parse(response.content)
+        parsed_feed = feedparser.parse(response.content)
 
-            if parsed_feed.bozo:
-                logger.warning("RSS feed from %s may be malformed", source_name)
+        if parsed_feed.bozo:
+            logger.warning("RSS feed from %s may be malformed", source_name)
 
-            for entry in parsed_feed.entries[:limit]:
-                article = parse_rss_entry(entry, source_name, language)
+        if not parsed_feed.entries:
+            raise ValueError(f"{source_name} did not return any RSS or Atom entries")
 
-                if article is None:
-                    continue
+        for entry in parsed_feed.entries[:limit]:
+            article = parse_rss_entry(entry, source_name, language)
 
-                if article.content is None:
-                    article.content = await fetch_article_content(client, article.url)
+            if article is None:
+                continue
 
-                articles.append(article)
-    except httpx.HTTPError as error:
-        logger.warning("Could not fetch RSS feed from %s: %s", source_name, error)
-        return articles
+            articles.append(article)
+
+        if not articles:
+            raise ValueError(f"{source_name} did not return any usable articles")
 
     return articles
 

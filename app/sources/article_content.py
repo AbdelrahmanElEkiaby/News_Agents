@@ -1,7 +1,10 @@
+import asyncio
 import logging
 
 import httpx
 from bs4 import BeautifulSoup
+
+from app.models.article_db import ArticleDB
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +21,31 @@ async def fetch_article_content(client: httpx.AsyncClient, url: str) -> str | No
         return None
 
     return extract_text_from_html(response.text)
+
+
+async def fetch_article_contents(
+    articles: list[ArticleDB],
+    max_concurrency: int = 5,
+) -> dict[int, str]:
+    if not articles:
+        return {}
+
+    semaphore = asyncio.Semaphore(max_concurrency)
+
+    async with httpx.AsyncClient(
+        timeout=10.0,
+        follow_redirects=True,
+        headers={"User-Agent": "NewsAgentLearningProject/1.0"},
+    ) as client:
+
+        async def fetch_one(article: ArticleDB) -> tuple[int, str | None]:
+            async with semaphore:
+                content = await fetch_article_content(client, article.url)
+                return article.id, content
+
+        results = await asyncio.gather(*(fetch_one(article) for article in articles))
+
+    return {article_id: content for article_id, content in results if content}
 
 
 def extract_text_from_html(html: str) -> str | None:

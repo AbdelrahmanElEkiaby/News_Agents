@@ -47,14 +47,12 @@ class ArticleFetchResult(BaseModel):
     content_updated: int
     classified: int
     summarized: int
+    ai_processing_started: bool = False
 
 
-class ArticleClassification(BaseModel):
+class ArticleAnalysis(BaseModel):
     language: str
     category: ArticleCategory
     topics: list[str]
-
-
-class ArticleSummary(BaseModel):
     summary: str
     key_points: list[str]

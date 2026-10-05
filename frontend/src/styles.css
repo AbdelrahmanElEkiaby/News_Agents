@@ -216,8 +216,15 @@ select {
   align-items: end;
   display: grid;
   gap: 10px;
-  grid-template-columns: minmax(220px, 2fr) minmax(160px, 1fr) 130px auto;
+  grid-template-columns: minmax(190px, 1.5fr) minmax(210px, 1.5fr) minmax(140px, 1fr) 120px auto;
   margin-bottom: 18px;
+}
+
+.source-help {
+  color: #5d6861;
+  font-size: 14px;
+  line-height: 1.45;
+  margin: 0 0 14px;
 }
 
 .source-form input,
@@ -228,6 +235,17 @@ select {
   color: #27332c;
   min-height: 42px;
   padding: 9px 10px;
+}
+
+.feed-choice {
+  display: grid;
+  font-size: 13px;
+  gap: 6px;
+  grid-column: 1 / -1;
+}
+
+.feed-choice span {
+  color: #5d6861;
 }
 
 .source-message {
@@ -295,6 +313,10 @@ select {
 
 .source-error {
   color: #a33a30 !important;
+}
+
+.source-url {
+  overflow-wrap: anywhere;
 }
 
 .article-row {

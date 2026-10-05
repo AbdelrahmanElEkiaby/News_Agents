@@ -26,21 +26,15 @@ This project is being built one phase at a time.
 - `GET /articles` to list saved articles
 - `GET /articles/{id}` to read one saved article
 
-## Phase 3 Features
+## Phase 3 And 4 Features
 
-- OpenAI article classification for newly saved articles
-- Structured output using a Pydantic model
-- Stores `category` and `topics` in PostgreSQL
-- Skips duplicate URLs so old articles are not classified again
-
-## Phase 4 Features
-
-- OpenAI article summarization for newly saved articles
-- Short summaries in the article language
-- Key points stored with each article
-- Skips duplicate URLs so old articles are not summarized again
-- Basic article content extraction using `httpx` and BeautifulSoup
-- Updates missing content on duplicate articles when the same URL is fetched again
+- One structured OpenAI request classifies and summarizes each article
+- Stores language, category, topics, summary, and key points in PostgreSQL
+- Short summaries are written in the article language
+- Duplicate URLs are removed before article pages or OpenAI are requested
+- Article pages are downloaded concurrently with a bounded worker count
+- Manual fetches queue AI processing in the background
+- Existing rows with missing summaries are included in the next background pass
 
 ## Phase 5 Features
 
@@ -81,6 +75,11 @@ This project is being built one phase at a time.
 - `DELETE /sources/{id}` safely disables a source by setting `is_active = false`
 - The backend can discover RSS or Atom feeds from a website URL
 - The frontend has a Sources screen for adding, enabling, disabling, and deleting sources
+- A direct RSS or Atom URL can be supplied when a website blocks automatic discovery
+- Direct feed URLs are validated before they are stored
+- Discovery collects and ranks every valid feed it finds instead of accepting the first URL
+- The frontend recommends one feed and shows a selector when a website has multiple feeds
+- Fetch failures are recorded on the source without stopping other sources
 
 ```text
 Website
@@ -122,8 +121,7 @@ News_Agents/
 |   |   `-- source_db.py
 |   |-- services/
 |   |   |-- __init__.py
-|   |   |-- article_classification.py
-|   |   |-- article_summarization.py
+|   |   |-- article_analysis.py
 |   |   |-- article_storage.py
 |   |   |-- news_collection.py
 |   |   |-- pipeline.py
@@ -134,7 +132,6 @@ News_Agents/
 |       |-- __init__.py
 |       |-- article_content.py
 |       |-- feed_discovery.py
-|       |-- hacker_news.py
 |       |-- rss.py
 |       `-- source_fetcher.py
 |-- .env.example
@@ -160,15 +157,15 @@ Create a `.env` file using `.env.example` as a guide:
 ```env
 OPENAI_API_KEY=
 OPENAI_MODEL=gpt-5-nano
-DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5433/news_agents
+DATABASE_URL=postgresql+psycopg://postgres:newsagent123@localhost:5433/news_agents
 NEWS_FETCH_INTERVAL_MINUTES=30
 ```
 
 ## Setup
 
 ```bash
-python -m venv .venv
-.venv\Scripts\activate
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
@@ -207,6 +204,8 @@ curl -X POST http://127.0.0.1:8000/articles/fetch
 ```
 
 The same pipeline also runs automatically in the background based on `NEWS_FETCH_INTERVAL_MINUTES`.
+For a manual request, feed ingestion and article-page downloads finish first, then AI analysis is
+queued in the background so the HTTP request does not wait for every model response.
 
 The pipeline now reads active rows from the `sources` table. A disabled source is skipped automatically.
 
@@ -218,9 +217,17 @@ Expected response:
   "saved": 5,
   "duplicates": 15,
   "content_updated": 10,
-  "classified": 5,
-  "summarized": 5
+  "classified": 0,
+  "summarized": 0,
+  "ai_processing_started": true
 }
+```
+
+The zero AI counts in this response mean the work was queued, not skipped. To queue a backfill
+without fetching feeds again, use:
+
+```bash
+curl -X POST http://127.0.0.1:8000/articles/process-missing
 ```
 
 ## List Saved Articles
@@ -339,6 +346,9 @@ curl -X POST http://127.0.0.1:8000/sources \
   -d "{\"name\": \"BBC News\", \"website_url\": \"https://www.bbc.com\", \"feed_url\": \"https://feeds.bbci.co.uk/news/rss.xml\", \"language\": \"en\", \"source_type\": \"rss\"}"
 ```
 
+The backend validates direct RSS and Atom URLs before saving them. This is useful when a
+publisher blocks homepage discovery or hosts its feed on another domain.
+
 Discover a feed:
 
 ```bash
@@ -346,6 +356,35 @@ curl -X POST http://127.0.0.1:8000/sources/discover \
   -H "Content-Type: application/json" \
   -d "{\"url\": \"https://techcrunch.com\"}"
 ```
+
+Discovery checks direct feeds, RSS/Atom metadata, HTTP link metadata, RSS links and directory
+pages, and common feed paths. Every candidate is parsed and scored using its discovery method,
+title, item count, publication recency, and hostname. A successful response includes the ranked
+feeds and the recommended feed:
+
+```json
+{
+  "website_url": "https://example.com",
+  "feed_url": "https://example.com/feed.xml",
+  "feed_found": true,
+  "message": "Found 2 RSS or Atom feed(s).",
+  "recommended_feed": "https://example.com/feed.xml",
+  "feeds": [
+    {
+      "title": "Latest News",
+      "feed_url": "https://example.com/feed.xml",
+      "feed_type": "rss",
+      "discovery_method": "html_alternate",
+      "item_count": 20,
+      "latest_published_at": "2026-10-05T10:00:00Z",
+      "score": 135
+    }
+  ]
+}
+```
+
+Discovery rejects local and private IP URLs, limits redirects and response sizes, and uses request
+timeouts. This prevents the public discovery endpoint from reading local services accidentally.
 
 Add a website source with automatic RSS discovery:
 
@@ -366,3 +405,5 @@ Disable a source:
 ```text
 DELETE /sources/1
 ```
+
+`DELETE` is a soft delete: it disables future fetching while keeping existing articles.

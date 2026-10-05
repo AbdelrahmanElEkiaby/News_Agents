@@ -1,7 +1,8 @@
 import logging
+from contextlib import asynccontextmanager
 from urllib.parse import urlparse
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
@@ -18,7 +19,7 @@ from app.models.source import (
     SourceWebsiteCreate,
 )
 from app.services.article_storage import get_article_by_id, get_articles
-from app.services.pipeline import run_news_pipeline
+from app.services.pipeline import process_missing_articles_in_background, run_news_pipeline
 from app.services.relevance import build_personalized_feed
 from app.services.scheduler import start_scheduler, stop_scheduler
 from app.services.source_storage import (
@@ -30,11 +31,31 @@ from app.services.source_storage import (
     seed_default_sources,
     update_source,
 )
-from app.sources.feed_discovery import discover_feed, normalize_website_url
+from app.sources.feed_discovery import discover_feeds, normalize_website_url, validate_feed_url
 
 logging.basicConfig(level=logging.INFO)
 
-app = FastAPI(title="News Agent API")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    create_database_tables()
+    session_local = get_session_local()
+    db = session_local()
+
+    try:
+        seed_default_sources(db)
+    finally:
+        db.close()
+
+    app.state.scheduler = start_scheduler()
+
+    try:
+        yield
+    finally:
+        stop_scheduler()
+
+
+app = FastAPI(title="News Agent API", lifespan=lifespan)
 app.state.settings = settings
 
 app.add_middleware(
@@ -49,33 +70,32 @@ app.add_middleware(
 )
 
 
-@app.on_event("startup")
-def startup():
-    create_database_tables()
-    session_local = get_session_local()
-    db = session_local()
-
-    try:
-        seed_default_sources(db)
-    finally:
-        db.close()
-
-    app.state.scheduler = start_scheduler()
-
-
-@app.on_event("shutdown")
-def shutdown():
-    stop_scheduler()
-
-
 @app.get("/")
 async def read_root():
     return {"message": "News Agent API is running"}
 
 
 @app.post("/articles/fetch", response_model=ArticleFetchResult)
-async def fetch_and_save_articles(db: Session = Depends(get_db)):
-    return await run_news_pipeline(db)
+async def fetch_and_save_articles(
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    result = await run_news_pipeline(db, process_ai=False)
+
+    if settings.openai_api_key:
+        background_tasks.add_task(process_missing_articles_in_background)
+        result["ai_processing_started"] = True
+
+    return result
+
+
+@app.post("/articles/process-missing")
+async def process_missing_articles(background_tasks: BackgroundTasks):
+    if not settings.openai_api_key:
+        raise HTTPException(status_code=503, detail="OPENAI_API_KEY is not configured")
+
+    background_tasks.add_task(process_missing_articles_in_background)
+    return {"message": "Missing article summaries were queued for background processing."}
 
 
 @app.get("/articles", response_model=list[ArticleRead])
@@ -111,21 +131,27 @@ def list_sources(db: Session = Depends(get_db)):
 @app.post("/sources/discover", response_model=SourceDiscoverResponse)
 async def discover_source(source_data: SourceDiscoverRequest):
     website_url = normalize_website_url(source_data.url)
-    feed_url = await discover_feed(website_url)
+    feeds = await discover_feeds(website_url)
 
-    if feed_url is None:
+    if not feeds:
         return SourceDiscoverResponse(
             website_url=website_url,
             feed_url=None,
             feed_found=False,
             message="No RSS or Atom feed found.",
+            feeds=[],
+            recommended_feed=None,
         )
+
+    recommended_feed = feeds[0]
 
     return SourceDiscoverResponse(
         website_url=website_url,
-        feed_url=feed_url,
+        feed_url=recommended_feed.feed_url,
         feed_found=True,
-        message="RSS or Atom feed found.",
+        message=f"Found {len(feeds)} RSS or Atom feed(s).",
+        feeds=feeds,
+        recommended_feed=recommended_feed.feed_url,
     )
 
 
@@ -135,17 +161,20 @@ async def create_source_from_website(
     db: Session = Depends(get_db),
 ):
     website_url = normalize_website_url(source_data.url)
-    feed_url = await discover_feed(website_url)
+    feeds = await discover_feeds(website_url)
 
-    if feed_url is None:
+    if not feeds:
         raise HTTPException(status_code=400, detail="No RSS or Atom feed found.")
+
+    recommended_feed = feeds[0]
+    feed_url = recommended_feed.feed_url
 
     existing_source = get_source_by_feed_url(db, feed_url)
 
     if existing_source is not None:
         raise HTTPException(status_code=400, detail="A source with this feed URL already exists")
 
-    source_name = source_data.name or get_name_from_url(website_url)
+    source_name = source_data.name or recommended_feed.title or get_name_from_url(website_url)
     create_data = SourceCreate(
         name=source_name,
         website_url=website_url,
@@ -168,7 +197,15 @@ def read_source(source_id: int, db: Session = Depends(get_db)):
 
 
 @app.post("/sources", response_model=SourceRead)
-def create_new_source(source_data: SourceCreate, db: Session = Depends(get_db)):
+async def create_new_source(source_data: SourceCreate, db: Session = Depends(get_db)):
+    if source_data.source_type == "rss":
+        feed_url = normalize_website_url(source_data.feed_url or "")
+
+        if not await validate_feed_url(feed_url):
+            raise HTTPException(status_code=400, detail="The RSS or Atom feed URL is not valid")
+
+        source_data.feed_url = feed_url
+
     existing_source = get_source_by_feed_url(db, source_data.feed_url)
 
     if existing_source is not None:
@@ -178,7 +215,7 @@ def create_new_source(source_data: SourceCreate, db: Session = Depends(get_db)):
 
 
 @app.patch("/sources/{source_id}", response_model=SourceRead)
-def update_existing_source(
+async def update_existing_source(
     source_id: int,
     source_data: SourceUpdate,
     db: Session = Depends(get_db),
@@ -187,6 +224,24 @@ def update_existing_source(
 
     if source is None:
         raise HTTPException(status_code=404, detail="Source not found")
+
+    updated_source_type = source_data.source_type or source.source_type
+    updated_feed_url = source.feed_url
+
+    if "feed_url" in source_data.model_fields_set:
+        updated_feed_url = source_data.feed_url
+
+    if updated_source_type == "rss":
+        if not updated_feed_url:
+            raise HTTPException(status_code=400, detail="feed_url is required for RSS sources")
+
+        normalized_feed_url = normalize_website_url(updated_feed_url)
+
+        if normalized_feed_url != source.feed_url or source.source_type != "rss":
+            if not await validate_feed_url(normalized_feed_url):
+                raise HTTPException(status_code=400, detail="The RSS or Atom feed URL is not valid")
+
+        source_data.feed_url = normalized_feed_url
 
     if source_data.feed_url and source_data.feed_url != source.feed_url:
         existing_source = get_source_by_feed_url(db, source_data.feed_url)

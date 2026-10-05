@@ -51,11 +51,31 @@ export type Source = {
   created_at: string;
 };
 
+export type DiscoveredFeed = {
+  title: string;
+  feed_url: string;
+  feed_type: string;
+  discovery_method: string;
+  item_count: number;
+  latest_published_at: string | null;
+  score: number;
+};
+
 export type SourceDiscoverResult = {
   website_url: string;
   feed_url: string | null;
   feed_found: boolean;
   message: string;
+  feeds: DiscoveredFeed[];
+  recommended_feed: string | null;
+};
+
+export type SourceCreateInput = {
+  name: string;
+  website_url: string | null;
+  feed_url: string;
+  language: string;
+  source_type: "rss";
 };
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://127.0.0.1:8000";
@@ -112,17 +132,13 @@ export async function discoverSource(url: string): Promise<SourceDiscoverResult>
   return response.json();
 }
 
-export async function createSourceFromWebsite(
-  url: string,
-  language: string,
-  name?: string,
-): Promise<Source> {
-  const response = await fetch(`${API_URL}/sources/from-website`, {
+export async function createSource(source: SourceCreateInput): Promise<Source> {
+  const response = await fetch(`${API_URL}/sources`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ url, language, name: name || null }),
+    body: JSON.stringify(source),
   });
 
   if (!response.ok) {

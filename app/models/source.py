@@ -3,7 +3,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-SourceType = Literal["rss", "api"]
+SourceType = Literal["rss"]
 
 
 class SourceCreate(BaseModel):
@@ -59,11 +59,23 @@ class SourceDiscoverRequest(BaseModel):
         return value.strip()
 
 
+class DiscoveredFeed(BaseModel):
+    title: str
+    feed_url: str
+    feed_type: str
+    discovery_method: str
+    item_count: int
+    latest_published_at: datetime | None
+    score: int
+
+
 class SourceDiscoverResponse(BaseModel):
     website_url: str
     feed_url: str | None
     feed_found: bool
     message: str
+    feeds: list[DiscoveredFeed] = Field(default_factory=list)
+    recommended_feed: str | None = None
 
 
 class SourceUpdate(BaseModel):

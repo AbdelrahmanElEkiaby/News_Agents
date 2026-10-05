@@ -17,9 +17,10 @@ import {
 
 import {
   ArticleDetails,
+  DiscoveredFeed,
   FeedArticle,
   Source,
-  createSourceFromWebsite,
+  createSource,
   deleteSource,
   discoverSource,
   fetchArticle,
@@ -264,8 +265,11 @@ function App() {
 function SourceManagementView() {
   const [sources, setSources] = React.useState<Source[]>([]);
   const [websiteUrl, setWebsiteUrl] = React.useState("");
+  const [feedUrl, setFeedUrl] = React.useState("");
   const [sourceName, setSourceName] = React.useState("");
   const [language, setLanguage] = React.useState("en");
+  const [discoveredFeeds, setDiscoveredFeeds] = React.useState<DiscoveredFeed[]>([]);
+  const [selectedFeedUrl, setSelectedFeedUrl] = React.useState("");
   const [message, setMessage] = React.useState<string | null>(null);
   const [isLoading, setIsLoading] = React.useState(false);
 
@@ -290,8 +294,8 @@ function SourceManagementView() {
   async function addSource(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (!websiteUrl.trim()) {
-      setMessage("Enter a website URL.");
+    if (!websiteUrl.trim() && !feedUrl.trim()) {
+      setMessage("Enter a website URL or a direct RSS/Atom feed URL.");
       return;
     }
 
@@ -299,23 +303,63 @@ function SourceManagementView() {
     setMessage(null);
 
     try {
-      const discovery = await discoverSource(websiteUrl);
+      if (feedUrl.trim()) {
+        await saveFeed(feedUrl.trim());
+      } else if (discoveredFeeds.length > 0) {
+        const selectedFeed = discoveredFeeds.find(
+          (candidate) => candidate.feed_url === selectedFeedUrl,
+        );
 
-      if (!discovery.feed_found) {
-        setMessage(discovery.message);
-        return;
+        if (!selectedFeed) {
+          setMessage("Choose one of the discovered feeds.");
+          return;
+        }
+
+        await saveFeed(selectedFeed.feed_url, selectedFeed.title);
+      } else {
+        const discovery = await discoverSource(websiteUrl);
+
+        if (!discovery.feed_found || discovery.feeds.length === 0) {
+          setMessage(discovery.message);
+          return;
+        }
+
+        if (discovery.feeds.length > 1) {
+          setDiscoveredFeeds(discovery.feeds);
+          setSelectedFeedUrl(discovery.recommended_feed ?? discovery.feeds[0].feed_url);
+          setMessage(`Found ${discovery.feeds.length} feeds. Choose one to add.`);
+          return;
+        }
+
+        await saveFeed(discovery.feeds[0].feed_url, discovery.feeds[0].title);
       }
 
-      await createSourceFromWebsite(websiteUrl, language, sourceName);
-      setWebsiteUrl("");
-      setSourceName("");
-      setMessage("Source added successfully.");
+      resetSourceForm();
       await loadSources();
+      setMessage("Source added successfully.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not add source");
     } finally {
       setIsLoading(false);
     }
+  }
+
+  async function saveFeed(selectedUrl: string, discoveredTitle?: string) {
+    await createSource({
+      name: sourceName.trim() || discoveredTitle || getSourceName(websiteUrl || selectedUrl),
+      website_url: websiteUrl.trim() || null,
+      feed_url: selectedUrl,
+      language,
+      source_type: "rss",
+    });
+  }
+
+  function resetSourceForm() {
+    setWebsiteUrl("");
+    setFeedUrl("");
+    setSourceName("");
+    setDiscoveredFeeds([]);
+    setSelectedFeedUrl("");
   }
 
   async function toggleSource(source: Source) {
@@ -339,6 +383,7 @@ function SourceManagementView() {
     try {
       await deleteSource(source.id);
       await loadSources();
+      setMessage("Source removed. Existing articles were kept.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not delete source");
     } finally {
@@ -363,12 +408,31 @@ function SourceManagementView() {
         </button>
       </div>
 
+      <p className="source-help">
+        Enter a website for automatic discovery. If the website blocks discovery, paste its
+        direct RSS or Atom URL too.
+      </p>
+
       <form className="source-form" onSubmit={addSource}>
         <input
-          onChange={(event) => setWebsiteUrl(event.target.value)}
-          placeholder="https://example.com"
+          onChange={(event) => {
+            setWebsiteUrl(event.target.value);
+            setDiscoveredFeeds([]);
+            setSelectedFeedUrl("");
+          }}
+          placeholder="Website URL"
           type="url"
           value={websiteUrl}
+        />
+        <input
+          onChange={(event) => {
+            setFeedUrl(event.target.value);
+            setDiscoveredFeeds([]);
+            setSelectedFeedUrl("");
+          }}
+          placeholder="RSS/Atom URL (optional)"
+          type="url"
+          value={feedUrl}
         />
         <input
           onChange={(event) => setSourceName(event.target.value)}
@@ -382,8 +446,28 @@ function SourceManagementView() {
         </select>
         <button className="primary-action compact-action" disabled={isLoading} type="submit">
           <Plus size={18} />
-          Add Source
+          {discoveredFeeds.length > 0
+            ? "Add Selected"
+            : feedUrl.trim()
+              ? "Add Source"
+              : "Discover"}
         </button>
+
+        {discoveredFeeds.length > 1 && (
+          <label className="feed-choice">
+            <span>Choose a discovered feed</span>
+            <select
+              onChange={(event) => setSelectedFeedUrl(event.target.value)}
+              value={selectedFeedUrl}
+            >
+              {discoveredFeeds.map((feed) => (
+                <option key={feed.feed_url} value={feed.feed_url}>
+                  {feed.title} ({feed.item_count} items)
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
       </form>
 
       {message && <p className="source-message">{message}</p>}
@@ -401,6 +485,7 @@ function SourceManagementView() {
               <p>
                 {source.source_type.toUpperCase()} - {source.language}
               </p>
+              {source.feed_url && <p className="source-url">{source.feed_url}</p>}
               <p>Last fetched: {formatDate(source.last_fetched_at)}</p>
               {source.last_error && <p className="source-error">{source.last_error}</p>}
             </div>
@@ -419,7 +504,7 @@ function SourceManagementView() {
                 aria-label="Delete source"
                 className="icon-button"
                 onClick={() => removeSource(source)}
-                title="Delete source"
+                title="Remove source (keeps existing articles)"
                 type="button"
               >
                 <Trash2 size={17} />
@@ -441,6 +526,15 @@ function formatDate(value: string | null) {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(value));
+}
+
+function getSourceName(url: string) {
+  try {
+    const normalizedUrl = url.startsWith("http") ? url : `https://${url}`;
+    return new URL(normalizedUrl).hostname.replace("www.", "");
+  } catch {
+    return "New Source";
+  }
 }
 
 function ArticleDetailsView({
