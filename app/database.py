@@ -44,6 +44,7 @@ def create_database_tables() -> None:
 
     Base.metadata.create_all(bind=get_engine())
     add_missing_article_columns()
+    add_missing_source_columns()
 
 
 def add_missing_article_columns() -> None:
@@ -52,6 +53,15 @@ def add_missing_article_columns() -> None:
         connection.execute(text("ALTER TABLE articles ADD COLUMN IF NOT EXISTS topics JSON"))
         connection.execute(text("ALTER TABLE articles ADD COLUMN IF NOT EXISTS summary TEXT"))
         connection.execute(text("ALTER TABLE articles ADD COLUMN IF NOT EXISTS key_points JSON"))
+
+
+def add_missing_source_columns() -> None:
+    with get_engine().begin() as connection:
+        connection.execute(text("ALTER TABLE sources ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true"))
+        connection.execute(text("ALTER TABLE sources ADD COLUMN IF NOT EXISTS last_fetched_at TIMESTAMP WITH TIME ZONE"))
+        connection.execute(text("ALTER TABLE sources ADD COLUMN IF NOT EXISTS last_success_at TIMESTAMP WITH TIME ZONE"))
+        connection.execute(text("ALTER TABLE sources ADD COLUMN IF NOT EXISTS last_error TEXT"))
+        connection.execute(text("ALTER TABLE sources ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT now()"))
 
 
 def get_db() -> Generator[Session, None, None]:

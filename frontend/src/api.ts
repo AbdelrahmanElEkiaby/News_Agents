@@ -37,6 +37,27 @@ export type FeedRequest = {
   max_articles: number;
 };
 
+export type Source = {
+  id: number;
+  name: string;
+  website_url: string | null;
+  feed_url: string | null;
+  language: string;
+  source_type: string;
+  is_active: boolean;
+  last_fetched_at: string | null;
+  last_success_at: string | null;
+  last_error: string | null;
+  created_at: string;
+};
+
+export type SourceDiscoverResult = {
+  website_url: string;
+  feed_url: string | null;
+  feed_found: boolean;
+  message: string;
+};
+
 const API_URL = import.meta.env.VITE_API_URL ?? "http://127.0.0.1:8000";
 
 export async function fetchFeed(request: FeedRequest): Promise<FeedArticle[]> {
@@ -60,6 +81,81 @@ export async function fetchArticle(articleId: number): Promise<ArticleDetails> {
 
   if (!response.ok) {
     throw new Error("Could not load article details");
+  }
+
+  return response.json();
+}
+
+export async function fetchSources(): Promise<Source[]> {
+  const response = await fetch(`${API_URL}/sources`);
+
+  if (!response.ok) {
+    throw new Error("Could not load sources");
+  }
+
+  return response.json();
+}
+
+export async function discoverSource(url: string): Promise<SourceDiscoverResult> {
+  const response = await fetch(`${API_URL}/sources/discover`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ url }),
+  });
+
+  if (!response.ok) {
+    throw new Error("Could not discover source");
+  }
+
+  return response.json();
+}
+
+export async function createSourceFromWebsite(
+  url: string,
+  language: string,
+  name?: string,
+): Promise<Source> {
+  const response = await fetch(`${API_URL}/sources/from-website`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ url, language, name: name || null }),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => null);
+    throw new Error(errorData?.detail ?? "Could not add source");
+  }
+
+  return response.json();
+}
+
+export async function updateSource(sourceId: number, updates: Partial<Source>): Promise<Source> {
+  const response = await fetch(`${API_URL}/sources/${sourceId}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(updates),
+  });
+
+  if (!response.ok) {
+    throw new Error("Could not update source");
+  }
+
+  return response.json();
+}
+
+export async function deleteSource(sourceId: number): Promise<Source> {
+  const response = await fetch(`${API_URL}/sources/${sourceId}`, {
+    method: "DELETE",
+  });
+
+  if (!response.ok) {
+    throw new Error("Could not delete source");
   }
 
   return response.json();

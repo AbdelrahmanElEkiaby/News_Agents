@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 async def run_news_pipeline(db: Session) -> dict[str, int]:
     logger.info("Fetching articles...")
-    articles = await fetch_all_articles()
+    articles = await fetch_all_articles(db)
     logger.info("%s articles received.", len(articles))
 
     stats, saved_articles = save_new_articles(db, articles)

@@ -1,4 +1,5 @@
 import logging
+from urllib.parse import urlparse
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,7 +9,14 @@ from app.config import settings
 from app.database import create_database_tables, get_db, get_session_local
 from app.models.article import ArticleFetchResult, ArticleRead
 from app.models.feed import FeedArticle, FeedRequest
-from app.models.source import SourceCreate, SourceRead, SourceUpdate
+from app.models.source import (
+    SourceCreate,
+    SourceDiscoverRequest,
+    SourceDiscoverResponse,
+    SourceRead,
+    SourceUpdate,
+    SourceWebsiteCreate,
+)
 from app.services.article_storage import get_article_by_id, get_articles
 from app.services.pipeline import run_news_pipeline
 from app.services.relevance import build_personalized_feed
@@ -22,6 +30,7 @@ from app.services.source_storage import (
     seed_default_sources,
     update_source,
 )
+from app.sources.feed_discovery import discover_feed, normalize_website_url
 
 logging.basicConfig(level=logging.INFO)
 
@@ -99,6 +108,55 @@ def list_sources(db: Session = Depends(get_db)):
     return get_sources(db)
 
 
+@app.post("/sources/discover", response_model=SourceDiscoverResponse)
+async def discover_source(source_data: SourceDiscoverRequest):
+    website_url = normalize_website_url(source_data.url)
+    feed_url = await discover_feed(website_url)
+
+    if feed_url is None:
+        return SourceDiscoverResponse(
+            website_url=website_url,
+            feed_url=None,
+            feed_found=False,
+            message="No RSS or Atom feed found.",
+        )
+
+    return SourceDiscoverResponse(
+        website_url=website_url,
+        feed_url=feed_url,
+        feed_found=True,
+        message="RSS or Atom feed found.",
+    )
+
+
+@app.post("/sources/from-website", response_model=SourceRead)
+async def create_source_from_website(
+    source_data: SourceWebsiteCreate,
+    db: Session = Depends(get_db),
+):
+    website_url = normalize_website_url(source_data.url)
+    feed_url = await discover_feed(website_url)
+
+    if feed_url is None:
+        raise HTTPException(status_code=400, detail="No RSS or Atom feed found.")
+
+    existing_source = get_source_by_feed_url(db, feed_url)
+
+    if existing_source is not None:
+        raise HTTPException(status_code=400, detail="A source with this feed URL already exists")
+
+    source_name = source_data.name or get_name_from_url(website_url)
+    create_data = SourceCreate(
+        name=source_name,
+        website_url=website_url,
+        feed_url=feed_url,
+        language=source_data.language,
+        source_type="rss",
+    )
+
+    return create_source(db, create_data)
+
+
 @app.get("/sources/{source_id}", response_model=SourceRead)
 def read_source(source_id: int, db: Session = Depends(get_db)):
     source = get_source_by_id(db, source_id)
@@ -147,3 +205,12 @@ def delete_source(source_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Source not found")
 
     return disable_source(db, source)
+
+
+def get_name_from_url(url: str) -> str:
+    hostname = urlparse(url).netloc.replace("www.", "")
+
+    if not hostname:
+        return "New Source"
+
+    return hostname.split(":")[0]

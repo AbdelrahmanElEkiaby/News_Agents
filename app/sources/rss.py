@@ -6,9 +6,22 @@ import feedparser
 import httpx
 
 from app.models.article import Article
+from app.models.source_db import SourceDB
 from app.sources.article_content import extract_text_from_feed_html, fetch_article_content
 
 logger = logging.getLogger(__name__)
+
+
+async def fetch_rss_source(source: SourceDB, limit: int = 10) -> list[Article]:
+    if not source.feed_url:
+        raise ValueError(f"{source.name} does not have a feed URL")
+
+    return await fetch_rss_articles(
+        feed_url=source.feed_url,
+        source_name=source.name,
+        language=source.language,
+        limit=limit,
+    )
 
 
 async def fetch_rss_articles(

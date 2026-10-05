@@ -1,22 +1,22 @@
+from datetime import datetime, timezone
+
 from sqlalchemy.orm import Session
 
 from app.models.source import SourceCreate, SourceUpdate
 from app.models.source_db import SourceDB
-from app.sources.rss_sources import AL_JAZEERA_ARABIC_RSS_URL, BBC_NEWS_RSS_URL
-
 
 DEFAULT_SOURCES = [
     {
         "name": "Al Jazeera Arabic",
         "website_url": "https://www.aljazeera.net",
-        "feed_url": AL_JAZEERA_ARABIC_RSS_URL,
+        "feed_url": "https://www.aljazeera.net/aljazeerarss",
         "language": "ar",
         "source_type": "rss",
     },
     {
         "name": "BBC News",
         "website_url": "https://www.bbc.com",
-        "feed_url": BBC_NEWS_RSS_URL,
+        "feed_url": "https://feeds.bbci.co.uk/news/rss.xml",
         "language": "en",
         "source_type": "rss",
     },
@@ -38,6 +38,15 @@ def seed_default_sources(db: Session) -> None:
 
 def get_sources(db: Session) -> list[SourceDB]:
     return db.query(SourceDB).order_by(SourceDB.id.asc()).all()
+
+
+def get_active_sources(db: Session) -> list[SourceDB]:
+    return (
+        db.query(SourceDB)
+        .filter(SourceDB.is_active.is_(True))
+        .order_by(SourceDB.id.asc())
+        .all()
+    )
 
 
 def get_source_by_id(db: Session, source_id: int) -> SourceDB | None:
@@ -82,3 +91,19 @@ def disable_source(db: Session, source: SourceDB) -> SourceDB:
     db.commit()
     db.refresh(source)
     return source
+
+
+def mark_source_fetch_started(db: Session, source: SourceDB) -> None:
+    source.last_fetched_at = datetime.now(timezone.utc)
+    db.commit()
+
+
+def mark_source_fetch_success(db: Session, source: SourceDB) -> None:
+    source.last_success_at = datetime.now(timezone.utc)
+    source.last_error = None
+    db.commit()
+
+
+def mark_source_fetch_error(db: Session, source: SourceDB, error: Exception) -> None:
+    source.last_error = str(error)[:500]
+    db.commit()

@@ -31,6 +31,41 @@ class SourceCreate(BaseModel):
         return self
 
 
+class SourceWebsiteCreate(BaseModel):
+    url: str = Field(min_length=1)
+    name: str | None = None
+    language: str = Field(default="en", min_length=2, max_length=5)
+
+    @field_validator("url", "name", "language")
+    @classmethod
+    def strip_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+
+        return value.strip()
+
+    @field_validator("language")
+    @classmethod
+    def normalize_language(cls, value: str) -> str:
+        return value.lower()
+
+
+class SourceDiscoverRequest(BaseModel):
+    url: str = Field(min_length=1)
+
+    @field_validator("url")
+    @classmethod
+    def strip_url(cls, value: str) -> str:
+        return value.strip()
+
+
+class SourceDiscoverResponse(BaseModel):
+    website_url: str
+    feed_url: str | None
+    feed_found: bool
+    message: str
+
+
 class SourceUpdate(BaseModel):
     name: str | None = None
     website_url: str | None = None

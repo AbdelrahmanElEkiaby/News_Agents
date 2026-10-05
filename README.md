@@ -72,15 +72,33 @@ This project is being built one phase at a time.
 - Article details panel with summary, ranking scores, topics, and original link
 - Uses normal React hooks and `fetch`
 
-## Dynamic Sources Refactor 
+## Dynamic Sources
 
-- Added a `sources` table
-- Seeded the current hardcoded RSS sources into PostgreSQL
-- Added source CRUD endpoints
+- News sources are stored in the `sources` table
+- The scheduler loads active sources from PostgreSQL
+- RSS sources use one generic RSS fetcher
+- Adding a normal RSS source does not require changing backend code
 - `DELETE /sources/{id}` safely disables a source by setting `is_active = false`
-- Existing hardcoded ingestion still works and has not been removed yet
+- The backend can discover RSS or Atom feeds from a website URL
+- The frontend has a Sources screen for adding, enabling, disabling, and deleting sources
 
-## Current News Sources
+```text
+Website
+   |
+RSS Discovery
+   |
+Source Database
+   |
+Scheduler
+   |
+Generic RSS Fetcher
+   |
+Articles
+   |
+AI Pipeline
+```
+
+## Seeded News Sources
 
 - Al Jazeera Arabic RSS
 - BBC News RSS
@@ -115,9 +133,10 @@ News_Agents/
 |   `-- sources/
 |       |-- __init__.py
 |       |-- article_content.py
+|       |-- feed_discovery.py
 |       |-- hacker_news.py
 |       |-- rss.py
-|       `-- rss_sources.py
+|       `-- source_fetcher.py
 |-- .env.example
 |-- docker-compose.yml
 |-- frontend/
@@ -188,6 +207,8 @@ curl -X POST http://127.0.0.1:8000/articles/fetch
 ```
 
 The same pipeline also runs automatically in the background based on `NEWS_FETCH_INTERVAL_MINUTES`.
+
+The pipeline now reads active rows from the `sources` table. A disabled source is skipped automatically.
 
 Expected response:
 
@@ -316,6 +337,22 @@ Create a source:
 curl -X POST http://127.0.0.1:8000/sources \
   -H "Content-Type: application/json" \
   -d "{\"name\": \"BBC News\", \"website_url\": \"https://www.bbc.com\", \"feed_url\": \"https://feeds.bbci.co.uk/news/rss.xml\", \"language\": \"en\", \"source_type\": \"rss\"}"
+```
+
+Discover a feed:
+
+```bash
+curl -X POST http://127.0.0.1:8000/sources/discover \
+  -H "Content-Type: application/json" \
+  -d "{\"url\": \"https://techcrunch.com\"}"
+```
+
+Add a website source with automatic RSS discovery:
+
+```bash
+curl -X POST http://127.0.0.1:8000/sources/from-website \
+  -H "Content-Type: application/json" \
+  -d "{\"url\": \"https://techcrunch.com\", \"language\": \"en\"}"
 ```
 
 Update a source:
