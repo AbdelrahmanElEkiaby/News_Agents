@@ -38,10 +38,12 @@ This project is being built one phase at a time.
 
 ## Phase 5 Features
 
-- Preferences are represented as a simple request model
-- Preferences are not stored in PostgreSQL yet
-- Future relevance endpoints can receive topics and languages directly in the API request
-- No authentication yet
+- Local user profiles are stored in PostgreSQL
+- Users subscribe to shared sources through the `user_sources` table
+- Public feeds are fetched once and reused by every subscribed user
+- Feed preferences are still supplied with each ranking request
+- Email and password authentication uses expiring JWT bearer tokens
+- Passwords are hashed with Argon2 and are never stored as plain text
 
 ## Phase 6 Features
 
@@ -80,6 +82,7 @@ This project is being built one phase at a time.
 - Discovery collects and ranks every valid feed it finds instead of accepting the first URL
 - The frontend recommends one feed and shows a selector when a website has multiple feeds
 - Fetch failures are recorded on the source without stopping other sources
+- Source definitions come only from PostgreSQL; there is no startup source list
 
 ```text
 Website
@@ -95,12 +98,9 @@ Generic RSS Fetcher
 Articles
    |
 AI Pipeline
+   |
+User Subscriptions
 ```
-
-## Seeded News Sources
-
-- Al Jazeera Arabic RSS
-- BBC News RSS
 
 ## Project Structure
 
@@ -114,30 +114,37 @@ News_Agents/
 |   |-- models/
 |   |   |-- __init__.py
 |   |   |-- article.py
-|   |   |-- article_db.py
-|   |   |-- feed.py
-|   |   |-- preference.py
 |   |   |-- source.py
-|   |   `-- source_db.py
+|   |   `-- user.py
+|   |-- schemas/
+|   |   |-- __init__.py
+|   |   |-- article.py
+|   |   |-- source.py
+|   |   `-- user.py
+|   |-- routers/
+|   |   |-- __init__.py
+|   |   |-- articles.py
+|   |   |-- auth.py
+|   |   |-- sources.py
+|   |   `-- users.py
 |   |-- services/
 |   |   |-- __init__.py
 |   |   |-- article_analysis.py
-|   |   |-- article_storage.py
-|   |   |-- news_collection.py
-|   |   |-- pipeline.py
-|   |   |-- scheduler.py
+|   |   |-- article_content.py
+|   |   |-- article_service.py
+|   |   |-- auth_service.py
+|   |   |-- feed_discovery.py
+|   |   |-- news_pipeline.py
 |   |   |-- relevance.py
-|   |   `-- source_storage.py
-|   `-- sources/
-|       |-- __init__.py
-|       |-- article_content.py
-|       |-- feed_discovery.py
-|       |-- rss.py
-|       `-- source_fetcher.py
+|   |   |-- rss_service.py
+|   |   |-- scheduler.py
+|   |   |-- source_service.py
+|   |   `-- user_service.py
 |-- .env.example
 |-- docker-compose.yml
 |-- frontend/
 |   |-- src/
+|   |   |-- AuthPage.tsx
 |   |   |-- api.ts
 |   |   |-- main.tsx
 |   |   |-- styles.css
@@ -159,7 +166,12 @@ OPENAI_API_KEY=
 OPENAI_MODEL=gpt-5-nano
 DATABASE_URL=postgresql+psycopg://postgres:newsagent123@localhost:5433/news_agents
 NEWS_FETCH_INTERVAL_MINUTES=30
+JWT_SECRET_KEY=replace-with-a-random-secret
+JWT_ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=1440
 ```
+
+Generate a local JWT signing secret with `openssl rand -hex 32` and place it in `.env`.
 
 ## Setup
 
@@ -197,10 +209,14 @@ Expected response:
 }
 ```
 
+Except for `/`, `/auth/register`, and `/auth/login`, API requests require the JWT returned by
+registration or login in an `Authorization: Bearer ...` header.
+
 ## Fetch And Save Articles
 
 ```bash
-curl -X POST http://127.0.0.1:8000/articles/fetch
+curl -X POST http://127.0.0.1:8000/articles/fetch \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
 
 The same pipeline also runs automatically in the background based on `NEWS_FETCH_INTERVAL_MINUTES`.
@@ -227,7 +243,8 @@ The zero AI counts in this response mean the work was queued, not skipped. To qu
 without fetching feeds again, use:
 
 ```bash
-curl -X POST http://127.0.0.1:8000/articles/process-missing
+curl -X POST http://127.0.0.1:8000/articles/process-missing \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
 
 ## List Saved Articles
@@ -258,9 +275,9 @@ Saved articles now include classification fields:
 }
 ```
 
-## Preferences Shape
+## Preferences And User Shape
 
-Preferences are not saved yet. Later relevance endpoints can accept this shape directly:
+Topic and language preferences are supplied with each feed request:
 
 ```json
 {
@@ -273,6 +290,7 @@ Preferences are not saved yet. Later relevance endpoints can accept this shape d
 
 ```bash
 curl -X POST http://127.0.0.1:8000/feed \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d "{\"topics\": [\"ai\", \"technology\", \"middle east\"], \"languages\": [\"ar\", \"en\"], \"max_articles\": 10}"
 ```
@@ -407,3 +425,40 @@ DELETE /sources/1
 ```
 
 `DELETE` is a soft delete: it disables future fetching while keeping existing articles.
+
+## Authentication API
+
+Register an account:
+
+```bash
+curl -X POST http://127.0.0.1:8000/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Ahmed","email":"ahmed@example.com","password":"strong-password"}'
+```
+
+Login uses OAuth2 form fields and returns a JWT:
+
+```bash
+curl -X POST http://127.0.0.1:8000/auth/login \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "username=ahmed@example.com&password=strong-password"
+```
+
+Send the returned token to protected endpoints:
+
+```text
+Authorization: Bearer YOUR_ACCESS_TOKEN
+```
+
+## User Subscriptions API
+
+Subscriptions always belong to the authenticated user:
+
+```text
+GET /users/me/sources
+POST /users/me/sources/{source_id}
+DELETE /users/me/sources/{source_id}
+```
+
+`POST /feed` automatically uses the authenticated user's subscriptions. A user ID is never
+accepted from the browser for feed or subscription ownership.

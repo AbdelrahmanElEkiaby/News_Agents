@@ -4,8 +4,8 @@ import logging
 from openai import AsyncOpenAI
 
 from app.config import settings
-from app.models.article import ArticleAnalysis
-from app.models.article_db import ArticleDB
+from app.models.article import ArticleDB
+from app.schemas.article import ArticleAnalysis
 
 logger = logging.getLogger(__name__)
 

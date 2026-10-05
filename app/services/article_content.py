@@ -4,7 +4,7 @@ import logging
 import httpx
 from bs4 import BeautifulSoup
 
-from app.models.article_db import ArticleDB
+from app.models.article import ArticleDB
 
 logger = logging.getLogger(__name__)
 

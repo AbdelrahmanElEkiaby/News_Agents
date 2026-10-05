@@ -4,9 +4,8 @@ from datetime import datetime, timezone
 from openai import AsyncOpenAI
 
 from app.config import settings
-from app.models.feed import ArticleRelevance, FeedArticle
-from app.models.preference import Preferences
-from app.models.article_db import ArticleDB
+from app.models.article import ArticleDB
+from app.schemas.article import ArticleRelevance, FeedArticle, Preferences
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +34,7 @@ async def build_personalized_feed(
         feed_articles.append(
             FeedArticle(
                 id=article.id,
+                source_id=article.source_id,
                 title=article.title,
                 url=article.url,
                 source=article.source,

@@ -5,6 +5,7 @@ import {
   ExternalLink,
   Globe2,
   Loader2,
+  LogOut,
   Newspaper,
   Plus,
   Power,
@@ -20,14 +21,22 @@ import {
   DiscoveredFeed,
   FeedArticle,
   Source,
+  User,
+  clearToken,
   createSource,
   deleteSource,
   discoverSource,
   fetchArticle,
+  fetchCurrentUser,
   fetchFeed,
   fetchSources,
+  fetchUserSources,
+  getStoredToken,
+  subscribeToSource,
+  unsubscribeFromSource,
   updateSource,
 } from "./api";
+import { AuthPage } from "./AuthPage";
 import "./styles.css";
 
 const topicOptions = [
@@ -53,6 +62,55 @@ function App() {
   const [isLoadingFeed, setIsLoadingFeed] = React.useState(false);
   const [isLoadingDetails, setIsLoadingDetails] = React.useState(false);
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
+  const [currentUser, setCurrentUser] = React.useState<User | null>(null);
+  const [isCheckingAuth, setIsCheckingAuth] = React.useState(true);
+
+  React.useEffect(() => {
+    let isMounted = true;
+
+    async function restoreSession() {
+      if (!getStoredToken()) {
+        setIsCheckingAuth(false);
+        return;
+      }
+
+      try {
+        const user = await fetchCurrentUser();
+
+        if (isMounted) {
+          setCurrentUser(user);
+        }
+      } catch {
+        clearToken();
+      } finally {
+        if (isMounted) {
+          setIsCheckingAuth(false);
+        }
+      }
+    }
+
+    function handleUnauthorized() {
+      if (isMounted) {
+        setCurrentUser(null);
+      }
+    }
+
+    window.addEventListener("auth:unauthorized", handleUnauthorized);
+    restoreSession();
+
+    return () => {
+      isMounted = false;
+      window.removeEventListener("auth:unauthorized", handleUnauthorized);
+    };
+  }, []);
+
+  function logout() {
+    clearToken();
+    setCurrentUser(null);
+    setFeed([]);
+    setSelectedArticle(null);
+    setArticleDetails(null);
+  }
 
   async function loadFeed() {
     setIsLoadingFeed(true);
@@ -107,6 +165,19 @@ function App() {
     setLanguages([...languages, language]);
   }
 
+  if (isCheckingAuth) {
+    return (
+      <main className="auth-loading">
+        <Loader2 className="spin" size={24} />
+        Checking your session
+      </main>
+    );
+  }
+
+  if (currentUser === null) {
+    return <AuthPage onAuthenticated={setCurrentUser} />;
+  }
+
   return (
     <main className="app-shell">
       <section className="preferences-panel" aria-label="Preferences">
@@ -131,6 +202,16 @@ function App() {
           >
             <Database size={16} />
             Sources
+          </button>
+        </div>
+
+        <div className="account-card">
+          <div>
+            <strong>{currentUser.name}</strong>
+            <span>{currentUser.email}</span>
+          </div>
+          <button aria-label="Logout" onClick={logout} title="Logout" type="button">
+            <LogOut size={16} />
           </button>
         </div>
 
@@ -272,6 +353,7 @@ function SourceManagementView() {
   const [selectedFeedUrl, setSelectedFeedUrl] = React.useState("");
   const [message, setMessage] = React.useState<string | null>(null);
   const [isLoading, setIsLoading] = React.useState(false);
+  const [subscribedSourceIds, setSubscribedSourceIds] = React.useState<Set<number>>(new Set());
 
   React.useEffect(() => {
     loadSources();
@@ -282,8 +364,12 @@ function SourceManagementView() {
     setMessage(null);
 
     try {
-      const loadedSources = await fetchSources();
+      const [loadedSources, subscribedSources] = await Promise.all([
+        fetchSources(),
+        fetchUserSources(),
+      ]);
       setSources(loadedSources);
+      setSubscribedSourceIds(new Set(subscribedSources.map((source) => source.id)));
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not load sources");
     } finally {
@@ -345,13 +431,15 @@ function SourceManagementView() {
   }
 
   async function saveFeed(selectedUrl: string, discoveredTitle?: string) {
-    await createSource({
+    const source = await createSource({
       name: sourceName.trim() || discoveredTitle || getSourceName(websiteUrl || selectedUrl),
       website_url: websiteUrl.trim() || null,
       feed_url: selectedUrl,
       language,
       source_type: "rss",
     });
+
+    await subscribeToSource(source.id);
   }
 
   function resetSourceForm() {
@@ -391,6 +479,30 @@ function SourceManagementView() {
     }
   }
 
+  async function toggleSubscription(source: Source) {
+    setIsLoading(true);
+    setMessage(null);
+
+    try {
+      let successMessage: string;
+
+      if (subscribedSourceIds.has(source.id)) {
+        await unsubscribeFromSource(source.id);
+        successMessage = `Unsubscribed from ${source.name}.`;
+      } else {
+        await subscribeToSource(source.id);
+        successMessage = `Subscribed to ${source.name}.`;
+      }
+
+      await loadSources();
+      setMessage(successMessage);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not update subscription");
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
   return (
     <section className="sources-panel" aria-label="Sources">
       <div className="section-title">
@@ -410,7 +522,7 @@ function SourceManagementView() {
 
       <p className="source-help">
         Enter a website for automatic discovery. If the website blocks discovery, paste its
-        direct RSS or Atom URL too.
+        direct RSS or Atom URL too. New sources are subscribed to your account.
       </p>
 
       <form className="source-form" onSubmit={addSource}>
@@ -481,6 +593,9 @@ function SourceManagementView() {
                 <span className={source.is_active ? "status active" : "status"}>
                   {source.is_active ? "Active" : "Disabled"}
                 </span>
+                {subscribedSourceIds.has(source.id) && (
+                  <span className="status subscribed">Subscribed</span>
+                )}
               </div>
               <p>
                 {source.source_type.toUpperCase()} - {source.language}
@@ -491,6 +606,13 @@ function SourceManagementView() {
             </div>
 
             <div className="source-actions">
+              <button
+                className="subscription-button"
+                onClick={() => toggleSubscription(source)}
+                type="button"
+              >
+                {subscribedSourceIds.has(source.id) ? "Unsubscribe" : "Subscribe"}
+              </button>
               <button
                 aria-label={source.is_active ? "Disable source" : "Enable source"}
                 className="icon-button"

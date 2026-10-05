@@ -8,3 +8,7 @@ psycopg[binary]
 openai
 beautifulsoup4
 apscheduler
+PyJWT
+pwdlib[argon2]
+python-multipart
+email-validator

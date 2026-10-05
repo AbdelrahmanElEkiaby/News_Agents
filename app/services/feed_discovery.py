@@ -9,7 +9,7 @@ import feedparser
 import httpx
 from bs4 import BeautifulSoup
 
-from app.models.source import DiscoveredFeed
+from app.schemas.source import DiscoveredFeed
 
 COMMON_FEED_PATHS = [
     "/feed",

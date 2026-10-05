@@ -5,11 +5,18 @@ from datetime import datetime, timezone
 import feedparser
 import httpx
 
-from app.models.article import Article
-from app.models.source_db import SourceDB
-from app.sources.article_content import extract_text_from_feed_html
+from app.models.source import SourceDB
+from app.schemas.article import Article
+from app.services.article_content import extract_text_from_feed_html
 
 logger = logging.getLogger(__name__)
+
+
+async def fetch_source(source: SourceDB) -> list[Article]:
+    if source.source_type == "rss":
+        return await fetch_rss_source(source)
+
+    raise ValueError(f"Unsupported source type: {source.source_type}")
 
 
 async def fetch_rss_source(source: SourceDB, limit: int = 10) -> list[Article]:
@@ -18,6 +25,7 @@ async def fetch_rss_source(source: SourceDB, limit: int = 10) -> list[Article]:
 
     return await fetch_rss_articles(
         feed_url=source.feed_url,
+        source_id=source.id,
         source_name=source.name,
         language=source.language,
         limit=limit,
@@ -26,6 +34,7 @@ async def fetch_rss_source(source: SourceDB, limit: int = 10) -> list[Article]:
 
 async def fetch_rss_articles(
     feed_url: str,
+    source_id: int,
     source_name: str,
     language: str,
     limit: int = 10,
@@ -39,30 +48,32 @@ async def fetch_rss_articles(
     ) as client:
         response = await client.get(feed_url)
         response.raise_for_status()
-
         parsed_feed = feedparser.parse(response.content)
 
-        if parsed_feed.bozo:
-            logger.warning("RSS feed from %s may be malformed", source_name)
+    if parsed_feed.bozo:
+        logger.warning("RSS feed from %s may be malformed", source_name)
 
-        if not parsed_feed.entries:
-            raise ValueError(f"{source_name} did not return any RSS or Atom entries")
+    if not parsed_feed.entries:
+        raise ValueError(f"{source_name} did not return any RSS or Atom entries")
 
-        for entry in parsed_feed.entries[:limit]:
-            article = parse_rss_entry(entry, source_name, language)
+    for entry in parsed_feed.entries[:limit]:
+        article = parse_rss_entry(entry, source_id, source_name, language)
 
-            if article is None:
-                continue
-
+        if article is not None:
             articles.append(article)
 
-        if not articles:
-            raise ValueError(f"{source_name} did not return any usable articles")
+    if not articles:
+        raise ValueError(f"{source_name} did not return any usable articles")
 
     return articles
 
 
-def parse_rss_entry(entry, source_name: str, language: str) -> Article | None:
+def parse_rss_entry(
+    entry,
+    source_id: int,
+    source_name: str,
+    language: str,
+) -> Article | None:
     try:
         title = clean_text(entry.get("title", ""))
         url = entry.get("link", "")
@@ -72,17 +83,16 @@ def parse_rss_entry(entry, source_name: str, language: str) -> Article | None:
             return None
 
         description = clean_text(entry.get("summary") or entry.get("description") or "")
-        content = parse_entry_content(entry)
-        published_at = parse_rss_date(entry)
 
         return Article(
             title=title,
             url=url,
             source=source_name,
+            source_id=source_id,
             language=language,
             description=description or None,
-            content=content,
-            published_at=published_at,
+            content=parse_entry_content(entry),
+            published_at=parse_rss_date(entry),
         )
     except Exception as error:
         logger.warning("Skipping malformed RSS entry from %s: %s", source_name, error)
@@ -105,8 +115,7 @@ def parse_entry_content(entry) -> str | None:
     if not entry_content:
         return None
 
-    first_content_item = entry_content[0]
-    html = first_content_item.get("value", "")
+    html = entry_content[0].get("value", "")
 
     if not html:
         return None

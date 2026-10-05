@@ -1,11 +1,15 @@
-from sqlalchemy import or_
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from app.models.article import Article, ArticleAnalysis
-from app.models.article_db import ArticleDB
+from app.models.article import ArticleDB
+from app.models.user import UserSourceDB
+from app.schemas.article import Article, ArticleAnalysis
 
 
-def save_new_articles(db: Session, articles: list[Article]) -> tuple[dict[str, int], list[ArticleDB]]:
+def save_new_articles(
+    db: Session,
+    articles: list[Article],
+) -> tuple[dict[str, int], list[ArticleDB]]:
     saved_count = 0
     duplicate_count = 0
     content_updated_count = 0
@@ -31,6 +35,9 @@ def save_new_articles(db: Session, articles: list[Article]) -> tuple[dict[str, i
         existing_article = existing_by_url.get(article.url)
 
         if existing_article is not None:
+            if existing_article.source_id is None and article.source_id is not None:
+                existing_article.source_id = article.source_id
+
             if not existing_article.content and article.content:
                 existing_article.content = article.content
                 content_updated_count += 1
@@ -46,14 +53,12 @@ def save_new_articles(db: Session, articles: list[Article]) -> tuple[dict[str, i
 
     db.commit()
 
-    stats = {
+    return {
         "fetched": len(articles),
         "saved": saved_count,
         "duplicates": duplicate_count,
         "content_updated": content_updated_count,
-    }
-
-    return stats, saved_articles
+    }, saved_articles
 
 
 def save_article_contents(db: Session, contents: dict[int, str]) -> int:
@@ -115,8 +120,14 @@ def save_article_analyses(
     return classified_count, summarized_count
 
 
-def get_articles(db: Session) -> list[ArticleDB]:
-    return db.query(ArticleDB).order_by(ArticleDB.published_at.desc().nullslast()).all()
+def get_articles_for_user(db: Session, user_id: int) -> list[ArticleDB]:
+    source_ids = select(UserSourceDB.source_id).where(UserSourceDB.user_id == user_id)
+    return (
+        db.query(ArticleDB)
+        .filter(ArticleDB.source_id.in_(source_ids))
+        .order_by(ArticleDB.published_at.desc().nullslast())
+        .all()
+    )
 
 
 def get_article_by_id(db: Session, article_id: int) -> ArticleDB | None:

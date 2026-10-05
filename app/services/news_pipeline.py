@@ -5,18 +5,51 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import get_session_local
+from app.schemas.article import Article
 from app.services.article_analysis import analyze_articles
-from app.services.article_storage import (
+from app.services.article_service import (
     get_articles_missing_analysis,
     save_article_analyses,
     save_article_contents,
     save_new_articles,
 )
-from app.services.news_collection import fetch_all_articles
-from app.sources.article_content import fetch_article_contents
+from app.services.rss_service import fetch_source
+from app.services.source_service import (
+    get_active_sources,
+    mark_source_fetch_error,
+    mark_source_fetch_started,
+    mark_source_fetch_success,
+)
+from app.services.article_content import fetch_article_contents
 
 logger = logging.getLogger(__name__)
 analysis_lock = asyncio.Lock()
+
+
+async def fetch_all_articles(db: Session) -> list[Article]:
+    articles: list[Article] = []
+    sources = get_active_sources(db)
+
+    for source in sources:
+        logger.info("Fetching %s...", source.name)
+        mark_source_fetch_started(db, source)
+
+    results = await asyncio.gather(
+        *(fetch_source(source) for source in sources),
+        return_exceptions=True,
+    )
+
+    for source, result in zip(sources, results, strict=True):
+        if isinstance(result, BaseException):
+            logger.warning("Unable to fetch %s: %s", source.name, result)
+            mark_source_fetch_error(db, source, result)
+            continue
+
+        articles.extend(result)
+        mark_source_fetch_success(db, source)
+        logger.info("%s articles received from %s.", len(result), source.name)
+
+    return articles
 
 
 async def run_news_pipeline(db: Session, process_ai: bool = True) -> dict[str, int | bool]:
@@ -41,10 +74,7 @@ async def run_news_pipeline(db: Session, process_ai: bool = True) -> dict[str, i
         async with analysis_lock:
             classified_count, summarized_count = await process_missing_articles(db)
 
-    logger.info("%s articles classified.", classified_count)
-    logger.info("%s articles summarized.", summarized_count)
     logger.info("Pipeline completed.")
-
     return {
         **stats,
         "classified": classified_count,

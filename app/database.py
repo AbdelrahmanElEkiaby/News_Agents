@@ -39,12 +39,15 @@ def get_session_local() -> sessionmaker[Session]:
 
 
 def create_database_tables() -> None:
-    import app.models.article_db
-    import app.models.source_db
+    import app.models.article
+    import app.models.source
+    import app.models.user
 
     Base.metadata.create_all(bind=get_engine())
     add_missing_article_columns()
     add_missing_source_columns()
+    add_missing_user_columns()
+    backfill_article_source_ids()
 
 
 def add_missing_article_columns() -> None:
@@ -53,6 +56,15 @@ def add_missing_article_columns() -> None:
         connection.execute(text("ALTER TABLE articles ADD COLUMN IF NOT EXISTS topics JSON"))
         connection.execute(text("ALTER TABLE articles ADD COLUMN IF NOT EXISTS summary TEXT"))
         connection.execute(text("ALTER TABLE articles ADD COLUMN IF NOT EXISTS key_points JSON"))
+        connection.execute(
+            text(
+                "ALTER TABLE articles ADD COLUMN IF NOT EXISTS source_id INTEGER "
+                "REFERENCES sources(id)"
+            )
+        )
+        connection.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_articles_source_id ON articles (source_id)")
+        )
 
 
 def add_missing_source_columns() -> None:
@@ -62,6 +74,32 @@ def add_missing_source_columns() -> None:
         connection.execute(text("ALTER TABLE sources ADD COLUMN IF NOT EXISTS last_success_at TIMESTAMP WITH TIME ZONE"))
         connection.execute(text("ALTER TABLE sources ADD COLUMN IF NOT EXISTS last_error TEXT"))
         connection.execute(text("ALTER TABLE sources ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT now()"))
+
+
+def add_missing_user_columns() -> None:
+    with get_engine().begin() as connection:
+        connection.execute(text("ALTER TABLE users DROP CONSTRAINT IF EXISTS users_name_key"))
+        connection.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR"))
+        connection.execute(
+            text("ALTER TABLE users ADD COLUMN IF NOT EXISTS hashed_password VARCHAR")
+        )
+        connection.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ix_users_email_lower "
+                "ON users (lower(email))"
+            )
+        )
+
+
+def backfill_article_source_ids() -> None:
+    with get_engine().begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE articles SET source_id = sources.id FROM sources "
+                "WHERE articles.source_id IS NULL "
+                "AND lower(articles.source) = lower(sources.name)"
+            )
+        )
 
 
 def get_db() -> Generator[Session, None, None]:

@@ -1,5 +1,6 @@
 export type FeedArticle = {
   id: number;
+  source_id: number | null;
   title: string;
   url: string;
   source: string;
@@ -17,6 +18,7 @@ export type FeedArticle = {
 
 export type ArticleDetails = {
   id: number;
+  source_id: number | null;
   title: string;
   url: string;
   source: string;
@@ -35,6 +37,19 @@ export type FeedRequest = {
   topics: string[];
   languages: string[];
   max_articles: number;
+};
+
+export type User = {
+  id: number;
+  name: string;
+  email: string;
+  created_at: string;
+};
+
+export type AuthResponse = {
+  access_token: string;
+  token_type: string;
+  user: User;
 };
 
 export type Source = {
@@ -79,13 +94,93 @@ export type SourceCreateInput = {
 };
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://127.0.0.1:8000";
+const TOKEN_KEY = "news_agent_access_token";
+
+export function getStoredToken(): string | null {
+  return localStorage.getItem(TOKEN_KEY);
+}
+
+export function storeToken(token: string): void {
+  localStorage.setItem(TOKEN_KEY, token);
+}
+
+export function clearToken(): void {
+  localStorage.removeItem(TOKEN_KEY);
+}
+
+async function authFetch(path: string, options: RequestInit = {}): Promise<Response> {
+  const token = getStoredToken();
+  const headers = new Headers(options.headers);
+
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+
+  const response = await fetch(`${API_URL}${path}`, { ...options, headers });
+
+  if (response.status === 401) {
+    clearToken();
+    window.dispatchEvent(new Event("auth:unauthorized"));
+  }
+
+  return response;
+}
+
+async function getErrorMessage(response: Response, fallback: string): Promise<string> {
+  const errorData = await response.json().catch(() => null);
+  return typeof errorData?.detail === "string" ? errorData.detail : fallback;
+}
+
+export async function registerUser(
+  name: string,
+  email: string,
+  password: string,
+): Promise<AuthResponse> {
+  const response = await fetch(`${API_URL}/auth/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, email, password }),
+  });
+
+  if (!response.ok) {
+    throw new Error(await getErrorMessage(response, "Could not create account"));
+  }
+
+  return response.json();
+}
+
+export async function loginUser(email: string, password: string): Promise<AuthResponse> {
+  const form = new URLSearchParams();
+  form.set("username", email);
+  form.set("password", password);
+
+  const response = await fetch(`${API_URL}/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: form,
+  });
+
+  if (!response.ok) {
+    throw new Error(await getErrorMessage(response, "Could not log in"));
+  }
+
+  return response.json();
+}
+
+export async function fetchCurrentUser(): Promise<User> {
+  const response = await authFetch("/auth/me");
+
+  if (!response.ok) {
+    throw new Error("Your session has expired");
+  }
+
+  return response.json();
+}
 
 export async function fetchFeed(request: FeedRequest): Promise<FeedArticle[]> {
-  const response = await fetch(`${API_URL}/feed`, {
+  const response = await authFetch("/feed", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(request),
   });
 
@@ -97,7 +192,7 @@ export async function fetchFeed(request: FeedRequest): Promise<FeedArticle[]> {
 }
 
 export async function fetchArticle(articleId: number): Promise<ArticleDetails> {
-  const response = await fetch(`${API_URL}/articles/${articleId}`);
+  const response = await authFetch(`/articles/${articleId}`);
 
   if (!response.ok) {
     throw new Error("Could not load article details");
@@ -107,7 +202,7 @@ export async function fetchArticle(articleId: number): Promise<ArticleDetails> {
 }
 
 export async function fetchSources(): Promise<Source[]> {
-  const response = await fetch(`${API_URL}/sources`);
+  const response = await authFetch("/sources");
 
   if (!response.ok) {
     throw new Error("Could not load sources");
@@ -117,11 +212,9 @@ export async function fetchSources(): Promise<Source[]> {
 }
 
 export async function discoverSource(url: string): Promise<SourceDiscoverResult> {
-  const response = await fetch(`${API_URL}/sources/discover`, {
+  const response = await authFetch("/sources/discover", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ url }),
   });
 
@@ -133,28 +226,23 @@ export async function discoverSource(url: string): Promise<SourceDiscoverResult>
 }
 
 export async function createSource(source: SourceCreateInput): Promise<Source> {
-  const response = await fetch(`${API_URL}/sources`, {
+  const response = await authFetch("/sources", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(source),
   });
 
   if (!response.ok) {
-    const errorData = await response.json().catch(() => null);
-    throw new Error(errorData?.detail ?? "Could not add source");
+    throw new Error(await getErrorMessage(response, "Could not add source"));
   }
 
   return response.json();
 }
 
 export async function updateSource(sourceId: number, updates: Partial<Source>): Promise<Source> {
-  const response = await fetch(`${API_URL}/sources/${sourceId}`, {
+  const response = await authFetch(`/sources/${sourceId}`, {
     method: "PATCH",
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(updates),
   });
 
@@ -166,13 +254,37 @@ export async function updateSource(sourceId: number, updates: Partial<Source>): 
 }
 
 export async function deleteSource(sourceId: number): Promise<Source> {
-  const response = await fetch(`${API_URL}/sources/${sourceId}`, {
-    method: "DELETE",
-  });
+  const response = await authFetch(`/sources/${sourceId}`, { method: "DELETE" });
 
   if (!response.ok) {
     throw new Error("Could not delete source");
   }
 
   return response.json();
+}
+
+export async function fetchUserSources(): Promise<Source[]> {
+  const response = await authFetch("/users/me/sources");
+
+  if (!response.ok) {
+    throw new Error("Could not load subscriptions");
+  }
+
+  return response.json();
+}
+
+export async function subscribeToSource(sourceId: number): Promise<void> {
+  const response = await authFetch(`/users/me/sources/${sourceId}`, { method: "POST" });
+
+  if (!response.ok) {
+    throw new Error("Could not subscribe to source");
+  }
+}
+
+export async function unsubscribeFromSource(sourceId: number): Promise<void> {
+  const response = await authFetch(`/users/me/sources/${sourceId}`, { method: "DELETE" });
+
+  if (!response.ok) {
+    throw new Error("Could not unsubscribe from source");
+  }
 }

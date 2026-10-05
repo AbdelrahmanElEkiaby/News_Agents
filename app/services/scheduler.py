@@ -4,7 +4,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from app.config import settings
 from app.database import get_session_local
-from app.services.pipeline import run_news_pipeline
+from app.services.news_pipeline import run_news_pipeline
 
 logger = logging.getLogger(__name__)
 
