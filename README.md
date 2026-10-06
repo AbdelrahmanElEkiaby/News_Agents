@@ -26,46 +26,50 @@ This project is being built one phase at a time.
 - `GET /articles` to list saved articles
 - `GET /articles/{id}` to read one saved article
 
-## Phase 3 And 4 Features
+## Article Intelligence Features
 
-- One structured OpenAI request classifies and summarizes each article
+- One Jev decision request classifies each article with bounded language, category, topic, and importance values
+- OpenAI is called only when a user requests a summary for one article
+- Stores classification confidence and a normalized importance score in PostgreSQL
 - Stores language, category, topics, summary, and key points in PostgreSQL
 - Short summaries are written in the article language
-- Duplicate URLs are removed before article pages or OpenAI are requested
+- Duplicate URLs are removed before article pages or AI services are requested
 - Article pages are downloaded concurrently with a bounded worker count
-- Manual fetches queue AI processing in the background
-- Existing rows with missing summaries are included in the next background pass
+- User scans classify waiting articles with Jev but do not call OpenAI
+- Generated summaries are stored and reused without another model call
+- Concurrent duplicate requests are blocked and failures have a retry cooldown
 
 ## Phase 5 Features
 
 - Local user profiles are stored in PostgreSQL
 - Users subscribe to shared sources through the `user_sources` table
 - Public feeds are fetched once and reused by every subscribed user
-- Feed preferences are still supplied with each ranking request
+- Each user sees articles from their subscribed sources
 - Email and password authentication uses expiring JWT bearer tokens
 - Passwords are hashed with Argon2 and are never stored as plain text
 
-## Phase 6 Features
+## Legacy Ranking API
 
 - `POST /feed` accepts preferences directly in the request body
 - Calculates AI relevance for saved articles
 - Adds deterministic freshness and topic-match scores
 - Returns articles ordered by final score
-- Limits each request to a small number of articles to control OpenAI cost
+- The current frontend does not call this endpoint
 
 ## Phase 7 Features
 
 - Background scheduler for the news pipeline
 - Fetch interval controlled by `NEWS_FETCH_INTERVAL_MINUTES`
-- Uses the same pipeline as `POST /articles/fetch`
-- Logs fetch, save, duplicate, classification, and summarization counts
+- Scans all active sources and processes missing classifications
+- Never generates summaries automatically
 
 ## Phase 8 Features
 
 - React and TypeScript frontend
-- Feed ranking screen
-- Preference controls for topics, languages, and article count
-- Article details panel with summary, ranking scores, topics, and original link
+- Source-first workflow with a dedicated scan button
+- Categories and topics are generated dynamically from saved articles
+- Category and topic filtering happens locally without an AI request
+- Article details display saved content and offer on-demand summary generation
 - Uses normal React hooks and `fetch`
 
 ## Dynamic Sources
@@ -129,9 +133,12 @@ News_Agents/
 |   |   `-- users.py
 |   |-- services/
 |   |   |-- __init__.py
-|   |   |-- article_analysis.py
+|   |   |-- article_classification.py
 |   |   |-- article_content.py
+|   |   |-- article_context.py
 |   |   |-- article_service.py
+|   |   |-- article_summary_service.py
+|   |   |-- article_summarization.py
 |   |   |-- auth_service.py
 |   |   |-- feed_discovery.py
 |   |   |-- news_pipeline.py
@@ -164,6 +171,8 @@ Create a `.env` file using `.env.example` as a guide:
 ```env
 OPENAI_API_KEY=
 OPENAI_MODEL=gpt-5-nano
+JEV_API_KEY=
+JEV_MODEL=jev-latest
 DATABASE_URL=postgresql+psycopg://postgres:newsagent123@localhost:5433/news_agents
 NEWS_FETCH_INTERVAL_MINUTES=30
 JWT_SECRET_KEY=replace-with-a-random-secret
@@ -219,9 +228,12 @@ curl -X POST http://127.0.0.1:8000/articles/fetch \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
 
-The same pipeline also runs automatically in the background based on `NEWS_FETCH_INTERVAL_MINUTES`.
-For a manual request, feed ingestion and article-page downloads finish first, then AI analysis is
-queued in the background so the HTTP request does not wait for every model response.
+The manual endpoint scans only the signed-in user's subscribed sources. It fetches article pages
+and classifies waiting articles with Jev before returning. It does not call OpenAI summarization.
+When no new items are found, existing saved articles remain available in the frontend.
+
+The scheduler separately scans all active sources based on `NEWS_FETCH_INTERVAL_MINUTES` and
+processes classifications only. It never generates summaries automatically.
 
 The pipeline now reads active rows from the `sources` table. A disabled source is skipped automatically.
 
@@ -233,14 +245,13 @@ Expected response:
   "saved": 5,
   "duplicates": 15,
   "content_updated": 10,
-  "classified": 0,
+  "classified": 5,
   "summarized": 0,
-  "ai_processing_started": true
+  "ai_processing_started": false
 }
 ```
 
-The zero AI counts in this response mean the work was queued, not skipped. To queue a backfill
-without fetching feeds again, use:
+To queue a classification backfill without fetching feeds again, use:
 
 ```bash
 curl -X POST http://127.0.0.1:8000/articles/process-missing \
@@ -259,6 +270,18 @@ http://127.0.0.1:8000/articles
 http://127.0.0.1:8000/articles/1
 ```
 
+## Generate One Summary
+
+```bash
+curl -X POST http://127.0.0.1:8000/articles/1/summary \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+The endpoint returns an existing summary without an OpenAI request. For an unsummarized article,
+the database reserves the work before calling OpenAI, preventing duplicate calls across clicks,
+tabs, or users. A user can start at most five new summaries per minute. Failed requests have a
+60-second retry cooldown and abandoned processing locks can be retried after five minutes.
+
 Saved articles now include classification fields:
 
 ```json
@@ -269,50 +292,20 @@ Saved articles now include classification fields:
   "language": "en",
   "content": "Extracted article text...",
   "category": "world",
-  "topics": ["middle east", "diplomacy"],
+  "topics": ["middle_east", "geopolitics"],
+  "importance": "high",
+  "importance_score": 0.6667,
+  "classification_confidence": 0.91,
   "summary": "A short summary of the article.",
   "key_points": ["First key point", "Second key point"]
 }
 ```
 
-## Preferences And User Shape
+## Dynamic Feed Filtering
 
-Topic and language preferences are supplied with each feed request:
-
-```json
-{
-  "topics": ["artificial intelligence", "technology", "middle east"],
-  "languages": ["ar", "en"]
-}
-```
-
-## Personalized Feed
-
-```bash
-curl -X POST http://127.0.0.1:8000/feed \
-  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d "{\"topics\": [\"ai\", \"technology\", \"middle east\"], \"languages\": [\"ar\", \"en\"], \"max_articles\": 10}"
-```
-
-Expected response:
-
-```json
-[
-  {
-    "id": 1,
-    "title": "Example article",
-    "summary": "Short summary...",
-    "category": "ai",
-    "topics": ["artificial intelligence"],
-    "score": 0.91,
-    "ai_relevance": 0.9,
-    "freshness_score": 1.0,
-    "topic_match_score": 0.8,
-    "reason": "The article matches the reader's AI interests."
-  }
-]
-```
+The frontend loads saved articles with `GET /articles`. It derives the available category and
+topic cards from those rows. Selecting a card filters the loaded articles in the browser and does
+not call OpenAI or the legacy `/feed` ranking endpoint.
 
 ## Run The Frontend
 

@@ -5,6 +5,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     openai_api_key: str = ""
     openai_model: str = "gpt-5-nano"
+    jev_api_key: str = ""
+    jev_model: str = "jev-latest"
     database_url: str = ""
     news_fetch_interval_minutes: int = 60
     jwt_secret_key: str

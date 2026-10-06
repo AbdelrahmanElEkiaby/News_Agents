@@ -1,9 +1,11 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import {
+  CalendarClock,
   Database,
   ExternalLink,
   Globe2,
+  LayoutGrid,
   Loader2,
   LogOut,
   Newspaper,
@@ -12,26 +14,28 @@ import {
   PowerOff,
   RefreshCw,
   Search,
-  SlidersHorizontal,
+  Sparkles,
+  Tags,
   Trash2,
 } from "lucide-react";
 
 import {
   ArticleDetails,
+  ArticleFetchResult,
   DiscoveredFeed,
-  FeedArticle,
   Source,
   User,
   clearToken,
   createSource,
   deleteSource,
   discoverSource,
-  fetchArticle,
+  fetchArticles,
   fetchCurrentUser,
-  fetchFeed,
   fetchSources,
   fetchUserSources,
+  generateArticleSummary,
   getStoredToken,
+  scanSources,
   subscribeToSource,
   unsubscribeFromSource,
   updateSource,
@@ -39,29 +43,18 @@ import {
 import { AuthPage } from "./AuthPage";
 import "./styles.css";
 
-const topicOptions = [
-  "ai",
-  "technology",
-  "business",
-  "middle east",
-  "politics",
-  "science",
-  "health",
-  "sports",
-  "entertainment",
-];
-
 function App() {
-  const [activeView, setActiveView] = React.useState<"feed" | "sources">("feed");
-  const [selectedTopics, setSelectedTopics] = React.useState<string[]>(["ai", "technology"]);
-  const [languages, setLanguages] = React.useState<string[]>(["ar", "en"]);
-  const [maxArticles, setMaxArticles] = React.useState(10);
-  const [feed, setFeed] = React.useState<FeedArticle[]>([]);
-  const [selectedArticle, setSelectedArticle] = React.useState<FeedArticle | null>(null);
-  const [articleDetails, setArticleDetails] = React.useState<ArticleDetails | null>(null);
-  const [isLoadingFeed, setIsLoadingFeed] = React.useState(false);
-  const [isLoadingDetails, setIsLoadingDetails] = React.useState(false);
+  const [activeView, setActiveView] = React.useState<"feed" | "sources">("sources");
+  const [articles, setArticles] = React.useState<ArticleDetails[]>([]);
+  const [selectedArticle, setSelectedArticle] = React.useState<ArticleDetails | null>(null);
+  const [selectedCategory, setSelectedCategory] = React.useState<string | null>(null);
+  const [selectedTopic, setSelectedTopic] = React.useState<string | null>(null);
+  const [publishedFrom, setPublishedFrom] = React.useState("");
+  const [publishedUntil, setPublishedUntil] = React.useState("");
+  const [isLoadingArticles, setIsLoadingArticles] = React.useState(false);
+  const [summarizingArticleId, setSummarizingArticleId] = React.useState<number | null>(null);
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
+  const [feedMessage, setFeedMessage] = React.useState<string | null>(null);
   const [currentUser, setCurrentUser] = React.useState<User | null>(null);
   const [isCheckingAuth, setIsCheckingAuth] = React.useState(true);
 
@@ -104,65 +97,128 @@ function App() {
     };
   }, []);
 
-  function logout() {
-    clearToken();
-    setCurrentUser(null);
-    setFeed([]);
-    setSelectedArticle(null);
-    setArticleDetails(null);
-  }
-
-  async function loadFeed() {
-    setIsLoadingFeed(true);
+  const loadArticles = React.useCallback(async () => {
+    setIsLoadingArticles(true);
     setErrorMessage(null);
 
     try {
-      const articles = await fetchFeed({
-        topics: selectedTopics,
-        languages,
-        max_articles: maxArticles,
+      const loadedArticles = await fetchArticles();
+      setArticles(loadedArticles);
+      setSelectedArticle((currentArticle) => {
+        if (currentArticle) {
+          return (
+            loadedArticles.find((article) => article.id === currentArticle.id) ??
+            loadedArticles[0] ??
+            null
+          );
+        }
+
+        return loadedArticles[0] ?? null;
       });
-      setFeed(articles);
-      setSelectedArticle(articles[0] ?? null);
-      setArticleDetails(null);
+      return loadedArticles.length;
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Something went wrong");
+      setErrorMessage(error instanceof Error ? error.message : "Could not load articles");
+      return 0;
     } finally {
-      setIsLoadingFeed(false);
+      setIsLoadingArticles(false);
     }
+  }, []);
+
+  React.useEffect(() => {
+    if (currentUser) {
+      loadArticles();
+    }
+  }, [currentUser, loadArticles]);
+
+  const categoryCounts = React.useMemo(
+    () => countValues(articles.flatMap((article) => (article.category ? [article.category] : []))),
+    [articles],
+  );
+  const topicCounts = React.useMemo(
+    () => countValues(articles.flatMap((article) => article.topics ?? [])),
+    [articles],
+  );
+  const filteredArticles = React.useMemo(() => {
+    const fromTimestamp = publishedFrom ? new Date(publishedFrom).getTime() : null;
+    const untilTimestamp = publishedUntil
+      ? new Date(publishedUntil).getTime() + 60_000 - 1
+      : null;
+
+    return articles.filter((article) => {
+      const matchesCategory = !selectedCategory || article.category === selectedCategory;
+      const matchesTopic = !selectedTopic || article.topics?.includes(selectedTopic);
+      const publishedTimestamp = new Date(article.published_at ?? article.created_at).getTime();
+      const matchesFrom = fromTimestamp === null || publishedTimestamp >= fromTimestamp;
+      const matchesUntil = untilTimestamp === null || publishedTimestamp <= untilTimestamp;
+
+      return matchesCategory && matchesTopic && matchesFrom && matchesUntil;
+    });
+  }, [articles, publishedFrom, publishedUntil, selectedCategory, selectedTopic]);
+
+  React.useEffect(() => {
+    if (selectedCategory && !categoryCounts.some(([value]) => value === selectedCategory)) {
+      setSelectedCategory(null);
+    }
+
+    if (selectedTopic && !topicCounts.some(([value]) => value === selectedTopic)) {
+      setSelectedTopic(null);
+    }
+  }, [categoryCounts, selectedCategory, selectedTopic, topicCounts]);
+
+  React.useEffect(() => {
+    if (
+      selectedArticle &&
+      !filteredArticles.some((article) => article.id === selectedArticle.id)
+    ) {
+      setSelectedArticle(filteredArticles[0] ?? null);
+    }
+  }, [filteredArticles, selectedArticle]);
+
+  function logout() {
+    clearToken();
+    setCurrentUser(null);
+    setArticles([]);
+    setSelectedArticle(null);
+    setSelectedCategory(null);
+    setSelectedTopic(null);
+    setPublishedFrom("");
+    setPublishedUntil("");
   }
 
-  async function selectArticle(article: FeedArticle) {
-    setSelectedArticle(article);
-    setArticleDetails(null);
-    setIsLoadingDetails(true);
+  async function handleScanComplete(result: ArticleFetchResult) {
+    const savedArticleCount = await loadArticles();
+    setFeedMessage(
+      result.saved > 0
+        ? `Added ${result.saved} new article${result.saved === 1 ? "" : "s"} and loaded your feed.`
+        : `No new articles were published. Showing ${savedArticleCount} saved article${savedArticleCount === 1 ? "" : "s"}.`,
+    );
+    setActiveView("feed");
+  }
+
+  async function handleGenerateSummary(article: ArticleDetails) {
+    if (summarizingArticleId !== null) {
+      return;
+    }
+
+    setSummarizingArticleId(article.id);
+    setErrorMessage(null);
 
     try {
-      const details = await fetchArticle(article.id);
-      setArticleDetails(details);
+      const summarizedArticle = await generateArticleSummary(article.id);
+      setArticles((currentArticles) =>
+        currentArticles.map((currentArticle) =>
+          currentArticle.id === summarizedArticle.id ? summarizedArticle : currentArticle,
+        ),
+      );
+      setSelectedArticle((currentArticle) =>
+        currentArticle?.id === summarizedArticle.id ? summarizedArticle : currentArticle,
+      );
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Could not load details");
+      await loadArticles();
+      setErrorMessage(error instanceof Error ? error.message : "Could not generate summary");
     } finally {
-      setIsLoadingDetails(false);
+      setSummarizingArticleId(null);
     }
-  }
-
-  function toggleTopic(topic: string) {
-    if (selectedTopics.includes(topic)) {
-      setSelectedTopics(selectedTopics.filter((selectedTopic) => selectedTopic !== topic));
-      return;
-    }
-
-    setSelectedTopics([...selectedTopics, topic]);
-  }
-
-  function toggleLanguage(language: string) {
-    if (languages.includes(language)) {
-      setLanguages(languages.filter((selectedLanguage) => selectedLanguage !== language));
-      return;
-    }
-
-    setLanguages([...languages, language]);
   }
 
   if (isCheckingAuth) {
@@ -182,7 +238,7 @@ function App() {
     <main className="app-shell">
       <section className="preferences-panel" aria-label="Preferences">
         <div className="panel-heading">
-          <SlidersHorizontal size={18} />
+          <Newspaper size={18} />
           <h1>News Agent</h1>
         </div>
 
@@ -215,59 +271,55 @@ function App() {
           </button>
         </div>
 
-        <div className="control-group">
-          <h2>Topics</h2>
-          <div className="topic-grid">
-            {topicOptions.map((topic) => (
+        {activeView === "feed" && (
+          <>
+            <FilterGroup
+              icon={<LayoutGrid size={15} />}
+              label="Categories"
+              options={categoryCounts}
+              selected={selectedCategory}
+              onSelect={setSelectedCategory}
+            />
+            <FilterGroup
+              icon={<Tags size={15} />}
+              label="Topics"
+              options={topicCounts}
+              selected={selectedTopic}
+              onSelect={setSelectedTopic}
+            />
+            <DateTimeFilter
+              from={publishedFrom}
+              onFromChange={(value) => {
+                setPublishedFrom(value);
+                if (publishedUntil && value > publishedUntil) {
+                  setPublishedUntil(value);
+                }
+              }}
+              onUntilChange={(value) => {
+                setPublishedUntil(value);
+                if (publishedFrom && value < publishedFrom) {
+                  setPublishedFrom(value);
+                }
+              }}
+              until={publishedUntil}
+            />
+
+            {(selectedCategory || selectedTopic || publishedFrom || publishedUntil) && (
               <button
-                className={selectedTopics.includes(topic) ? "chip selected" : "chip"}
-                key={topic}
-                onClick={() => toggleTopic(topic)}
+                className="clear-filters"
+                onClick={() => {
+                  setSelectedCategory(null);
+                  setSelectedTopic(null);
+                  setPublishedFrom("");
+                  setPublishedUntil("");
+                }}
                 type="button"
               >
-                {topic}
+                Show all articles
               </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="control-group">
-          <h2>Languages</h2>
-          <label className="check-row">
-            <input
-              checked={languages.includes("ar")}
-              onChange={() => toggleLanguage("ar")}
-              type="checkbox"
-            />
-            Arabic
-          </label>
-          <label className="check-row">
-            <input
-              checked={languages.includes("en")}
-              onChange={() => toggleLanguage("en")}
-              type="checkbox"
-            />
-            English
-          </label>
-        </div>
-
-        <div className="control-group">
-          <h2>Articles</h2>
-          <input
-            className="range"
-            max={20}
-            min={1}
-            onChange={(event) => setMaxArticles(Number(event.target.value))}
-            type="range"
-            value={maxArticles}
-          />
-          <div className="range-value">{maxArticles} ranked articles</div>
-        </div>
-
-        <button className="primary-action" disabled={isLoadingFeed} onClick={loadFeed} type="button">
-          {isLoadingFeed ? <Loader2 className="spin" size={18} /> : <Search size={18} />}
-          Rank feed
-        </button>
+            )}
+          </>
+        )}
 
         {errorMessage && <p className="error-message">{errorMessage}</p>}
       </section>
@@ -277,40 +329,59 @@ function App() {
           <section className="feed-panel" aria-label="Personalized feed">
             <div className="section-title">
               <Newspaper size={20} />
-              <h2>Feed</h2>
+              <div className="section-title-copy">
+                <h2>News</h2>
+                <span>{filteredArticles.length} articles</span>
+              </div>
               <button
-                aria-label="Refresh feed"
+                aria-label="Reload saved articles"
                 className="icon-button"
-                disabled={isLoadingFeed}
-                onClick={loadFeed}
-                title="Refresh feed"
+                disabled={isLoadingArticles}
+                onClick={loadArticles}
+                title="Reload saved articles"
                 type="button"
               >
-                <RefreshCw size={17} />
+                {isLoadingArticles ? (
+                  <Loader2 className="spin" size={17} />
+                ) : (
+                  <RefreshCw size={17} />
+                )}
               </button>
             </div>
 
-            {feed.length === 0 && (
+            {feedMessage && <p className="feed-message">{feedMessage}</p>}
+
+            {articles.length === 0 && !isLoadingArticles && (
               <div className="empty-feed">
                 <Globe2 size={28} />
-                <p>Select preferences and rank your saved articles.</p>
+                <p>Add and subscribe to sources, then scan them to build your feed.</p>
+                <button className="secondary-action" onClick={() => setActiveView("sources")}>
+                  Manage sources
+                </button>
+              </div>
+            )}
+
+            {articles.length > 0 && filteredArticles.length === 0 && (
+              <div className="empty-feed">
+                <Search size={28} />
+                <p>No saved articles match these filters.</p>
               </div>
             )}
 
             <div className="feed-list">
-              {feed.map((article) => (
+              {filteredArticles.map((article) => (
                 <button
                   className={selectedArticle?.id === article.id ? "article-row active" : "article-row"}
                   key={article.id}
-                  onClick={() => selectArticle(article)}
+                  onClick={() => setSelectedArticle(article)}
                   type="button"
                 >
                   <div className="article-row-top">
-                    <span>{article.category ?? "other"}</span>
-                    <strong>{Math.round(article.score * 100)}%</strong>
+                    <span>{formatLabel(article.category ?? "unclassified")}</span>
+                    <strong>{formatDate(article.published_at)}</strong>
                   </div>
                   <h3>{article.title}</h3>
-                  <p>{article.summary ?? "No summary saved yet."}</p>
+                  <p>{getArticlePreview(article)}</p>
                   <div className="meta-line">
                     {article.source} - {article.language ?? "unknown"}
                   </div>
@@ -323,27 +394,134 @@ function App() {
             {!selectedArticle && (
               <div className="empty-details">
                 <Newspaper size={30} />
-                <p>Choose an article to inspect its summary, ranking, and original link.</p>
+                <p>Choose an article to read its saved content.</p>
               </div>
             )}
 
             {selectedArticle && (
               <ArticleDetailsView
-                details={articleDetails}
-                fallbackArticle={selectedArticle}
-                isLoading={isLoadingDetails}
+                article={selectedArticle}
+                activeSummaryRequestId={summarizingArticleId}
+                onGenerateSummary={handleGenerateSummary}
               />
             )}
           </section>
         </>
       )}
 
-      {activeView === "sources" && <SourceManagementView />}
+      {activeView === "sources" && <SourceManagementView onScanComplete={handleScanComplete} />}
     </main>
   );
 }
 
-function SourceManagementView() {
+function FilterGroup({
+  icon,
+  label,
+  options,
+  selected,
+  onSelect,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  options: Array<[string, number]>;
+  selected: string | null;
+  onSelect: (value: string | null) => void;
+}) {
+  if (options.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="control-group">
+      <h2>
+        {icon}
+        {label}
+      </h2>
+      <div className="filter-grid">
+        {options.map(([value, count]) => (
+          <button
+            className={selected === value ? "filter-card selected" : "filter-card"}
+            key={value}
+            onClick={() => onSelect(selected === value ? null : value)}
+            type="button"
+          >
+            <span>{formatLabel(value)}</span>
+            <strong>{count}</strong>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function DateTimeFilter({
+  from,
+  until,
+  onFromChange,
+  onUntilChange,
+}: {
+  from: string;
+  until: string;
+  onFromChange: (value: string) => void;
+  onUntilChange: (value: string) => void;
+}) {
+  return (
+    <div className="control-group">
+      <h2>
+        <CalendarClock size={15} />
+        Published date & time
+      </h2>
+      <div className="date-time-grid">
+        <label>
+          <span>From</span>
+          <input
+            max={until || undefined}
+            onChange={(event) => onFromChange(event.target.value)}
+            type="datetime-local"
+            value={from}
+          />
+        </label>
+        <label>
+          <span>Until</span>
+          <input
+            min={from || undefined}
+            onChange={(event) => onUntilChange(event.target.value)}
+            type="datetime-local"
+            value={until}
+          />
+        </label>
+      </div>
+    </div>
+  );
+}
+
+function countValues(values: string[]): Array<[string, number]> {
+  const counts = new Map<string, number>();
+
+  values.forEach((value) => counts.set(value, (counts.get(value) ?? 0) + 1));
+  return [...counts.entries()].sort(([first], [second]) => first.localeCompare(second));
+}
+
+function formatLabel(value: string) {
+  return value
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (character: string) => character.toUpperCase());
+}
+
+function getArticlePreview(article: ArticleDetails) {
+  const preview = article.summary || article.description || article.content;
+  if (!preview) {
+    return "Open the original article to read more.";
+  }
+
+  return preview.length > 180 ? `${preview.slice(0, 177)}...` : preview;
+}
+
+function SourceManagementView({
+  onScanComplete,
+}: {
+  onScanComplete: (result: ArticleFetchResult) => Promise<void>;
+}) {
   const [sources, setSources] = React.useState<Source[]>([]);
   const [websiteUrl, setWebsiteUrl] = React.useState("");
   const [feedUrl, setFeedUrl] = React.useState("");
@@ -353,6 +531,7 @@ function SourceManagementView() {
   const [selectedFeedUrl, setSelectedFeedUrl] = React.useState("");
   const [message, setMessage] = React.useState<string | null>(null);
   const [isLoading, setIsLoading] = React.useState(false);
+  const [isScanning, setIsScanning] = React.useState(false);
   const [subscribedSourceIds, setSubscribedSourceIds] = React.useState<Set<number>>(new Set());
 
   React.useEffect(() => {
@@ -427,6 +606,26 @@ function SourceManagementView() {
       setMessage(error instanceof Error ? error.message : "Could not add source");
     } finally {
       setIsLoading(false);
+    }
+  }
+
+  async function scanSubscribedSources() {
+    if (subscribedSourceIds.size === 0) {
+      setMessage("Add or subscribe to at least one source before scanning.");
+      return;
+    }
+
+    setIsScanning(true);
+    setMessage(null);
+
+    try {
+      const result = await scanSources();
+      await loadSources();
+      await onScanComplete(result);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not scan sources");
+    } finally {
+      setIsScanning(false);
     }
   }
 
@@ -524,6 +723,25 @@ function SourceManagementView() {
         Enter a website for automatic discovery. If the website blocks discovery, paste its
         direct RSS or Atom URL too. New sources are subscribed to your account.
       </p>
+
+      <div className="scan-card">
+        <div>
+          <strong>Scan your subscribed sources</strong>
+          <p>
+            Fetch new articles and classify their categories and topics. Existing saved articles
+            remain available when nothing new is published.
+          </p>
+        </div>
+        <button
+          className="primary-action compact-action"
+          disabled={isScanning || isLoading || subscribedSourceIds.size === 0}
+          onClick={scanSubscribedSources}
+          type="button"
+        >
+          {isScanning ? <Loader2 className="spin" size={18} /> : <Search size={18} />}
+          {isScanning ? "Scanning..." : "Scan sources"}
+        </button>
+      </div>
 
       <form className="source-form" onSubmit={addSource}>
         <input
@@ -660,36 +878,89 @@ function getSourceName(url: string) {
 }
 
 function ArticleDetailsView({
-  details,
-  fallbackArticle,
-  isLoading,
+  article,
+  activeSummaryRequestId,
+  onGenerateSummary,
 }: {
-  details: ArticleDetails | null;
-  fallbackArticle: FeedArticle;
-  isLoading: boolean;
+  article: ArticleDetails;
+  activeSummaryRequestId: number | null;
+  onGenerateSummary: (article: ArticleDetails) => Promise<void>;
 }) {
-  const article = details ?? fallbackArticle;
-  const keyPoints = details?.key_points ?? [];
+  const keyPoints = article.key_points ?? [];
   const topics = article.topics ?? [];
+  const savedContent = article.summary || article.content || article.description;
+  const classificationReady = Boolean(
+    article.language && article.category && article.topics && article.importance,
+  );
+  const processingStartedAt = article.summary_requested_at
+    ? new Date(article.summary_requested_at).getTime()
+    : 0;
+  const processingIsActive =
+    article.summary_status === "processing" &&
+    processingStartedAt > Date.now() - 5 * 60 * 1000;
+  const isGeneratingThisArticle = activeSummaryRequestId === article.id;
+  const summaryButtonDisabled =
+    activeSummaryRequestId !== null || processingIsActive || !classificationReady;
 
   return (
     <div className="details-content">
       <div className="details-meta">
         <span>{article.source}</span>
         <span>{article.language ?? "unknown"}</span>
-        <span>{article.category ?? "other"}</span>
+        <span>{formatLabel(article.category ?? "unclassified")}</span>
+        {article.importance && <span>{formatLabel(article.importance)} importance</span>}
       </div>
 
       <h2>{article.title}</h2>
 
-      {isLoading && (
-        <div className="loading-line">
-          <Loader2 className="spin" size={16} />
-          Loading details
+      <p className="article-date">{formatDate(article.published_at)}</p>
+
+      {savedContent ? (
+        <div className="detail-block">
+          <h3>{article.summary ? "Saved Summary" : "Saved Content"}</h3>
+          <p className="summary-text">{savedContent}</p>
+        </div>
+      ) : (
+        <p className="summary-text">
+          No extracted content is saved. Use the original article link below.
+        </p>
+      )}
+
+      {!article.summary && (
+        <div className="summary-action-card">
+          <div>
+            <strong>Need a shorter version?</strong>
+            <p>
+              A summary is generated once, saved, and reused for everyone viewing this article.
+            </p>
+          </div>
+          <button
+            className="primary-action compact-action"
+            disabled={summaryButtonDisabled}
+            onClick={() => onGenerateSummary(article)}
+            type="button"
+          >
+            {isGeneratingThisArticle ? (
+              <Loader2 className="spin" size={17} />
+            ) : (
+              <Sparkles size={17} />
+            )}
+            {isGeneratingThisArticle
+              ? "Generating..."
+              : processingIsActive
+                ? "Summary in progress"
+                : classificationReady
+                  ? "Generate summary"
+                  : "Waiting for classification"}
+          </button>
         </div>
       )}
 
-      <p className="summary-text">{article.summary ?? "No summary saved yet."}</p>
+      {article.summary_generated_at && (
+        <p className="summary-generated-at">
+          Summary saved {formatDate(article.summary_generated_at)}
+        </p>
+      )}
 
       {keyPoints.length > 0 && (
         <div className="detail-block">
@@ -701,17 +972,6 @@ function ArticleDetailsView({
           </ul>
         </div>
       )}
-
-      <div className="detail-block">
-        <h3>Ranking</h3>
-        <div className="score-grid">
-          <Score label="Final" value={fallbackArticle.score} />
-          <Score label="AI" value={fallbackArticle.ai_relevance} />
-          <Score label="Fresh" value={fallbackArticle.freshness_score} />
-          <Score label="Topic" value={fallbackArticle.topic_match_score} />
-        </div>
-        <p className="reason">{fallbackArticle.reason}</p>
-      </div>
 
       {topics.length > 0 && (
         <div className="topic-list">
@@ -725,15 +985,6 @@ function ArticleDetailsView({
         <ExternalLink size={17} />
         Read original
       </a>
-    </div>
-  );
-}
-
-function Score({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="score-item">
-      <span>{label}</span>
-      <strong>{Math.round(value * 100)}%</strong>
     </div>
   );
 }

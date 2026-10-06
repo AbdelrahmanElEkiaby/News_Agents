@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.models.article import ArticleDB
 from app.models.user import UserSourceDB
-from app.schemas.article import Article, ArticleAnalysis
+from app.schemas.article import Article, ArticleClassification
 
 
 def save_new_articles(
@@ -79,45 +79,51 @@ def save_article_contents(db: Session, contents: dict[int, str]) -> int:
     return updated_count
 
 
-def get_articles_missing_analysis(db: Session, limit: int = 100) -> list[ArticleDB]:
-    return (
-        db.query(ArticleDB)
-        .filter(
-            or_(
-                ArticleDB.category.is_(None),
-                ArticleDB.topics.is_(None),
-                ArticleDB.summary.is_(None),
-                ArticleDB.key_points.is_(None),
-            )
+def get_articles_missing_classification(
+    db: Session,
+    limit: int = 100,
+    source_ids: set[int] | None = None,
+) -> list[ArticleDB]:
+    query = db.query(ArticleDB).filter(
+        or_(
+            ArticleDB.language.is_(None),
+            ArticleDB.category.is_(None),
+            ArticleDB.topics.is_(None),
+            ArticleDB.importance.is_(None),
+            ArticleDB.importance_score.is_(None),
+            ArticleDB.classification_confidence.is_(None),
         )
+    )
+
+    if source_ids is not None:
+        query = query.filter(ArticleDB.source_id.in_(source_ids))
+
+    return (
+        query
         .order_by(ArticleDB.created_at.asc())
         .limit(limit)
         .all()
     )
 
 
-def save_article_analyses(
+def save_article_classifications(
     db: Session,
-    analyses: list[tuple[ArticleDB, ArticleAnalysis]],
-) -> tuple[int, int]:
-    classified_count = 0
-    summarized_count = 0
+    classifications: list[tuple[ArticleDB, ArticleClassification]],
+) -> int:
+    for article, classification in classifications:
+        topics = [classification.primary_topic]
+        if classification.secondary_topic != "none":
+            topics.append(classification.secondary_topic)
 
-    for article, analysis in analyses:
-        if article.category is None or article.topics is None:
-            classified_count += 1
-
-        if article.summary is None or article.key_points is None:
-            summarized_count += 1
-
-        article.language = analysis.language
-        article.category = analysis.category
-        article.topics = analysis.topics
-        article.summary = analysis.summary
-        article.key_points = analysis.key_points
+        article.language = classification.language
+        article.category = classification.category
+        article.topics = topics
+        article.importance = classification.importance
+        article.importance_score = classification.importance_score
+        article.classification_confidence = classification.confidence
 
     db.commit()
-    return classified_count, summarized_count
+    return len(classifications)
 
 
 def get_articles_for_user(db: Session, user_id: int) -> list[ArticleDB]:

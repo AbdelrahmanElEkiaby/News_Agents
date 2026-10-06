@@ -6,6 +6,7 @@ feedparser
 sqlalchemy
 psycopg[binary]
 openai
+typesafe-sdk>=0.7,<0.8
 beautifulsoup4
 apscheduler
 PyJWT

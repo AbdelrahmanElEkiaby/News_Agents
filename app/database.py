@@ -58,6 +58,68 @@ def add_missing_article_columns() -> None:
         connection.execute(text("ALTER TABLE articles ADD COLUMN IF NOT EXISTS key_points JSON"))
         connection.execute(
             text(
+                "ALTER TABLE articles ADD COLUMN IF NOT EXISTS "
+                "summary_status VARCHAR DEFAULT 'not_requested'"
+            )
+        )
+        connection.execute(
+            text(
+                "ALTER TABLE articles ADD COLUMN IF NOT EXISTS "
+                "summary_requested_at TIMESTAMP WITH TIME ZONE"
+            )
+        )
+        connection.execute(
+            text(
+                "ALTER TABLE articles ADD COLUMN IF NOT EXISTS "
+                "summary_requested_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_articles_summary_requested_by_user_id "
+                "ON articles (summary_requested_by_user_id)"
+            )
+        )
+        connection.execute(
+            text(
+                "ALTER TABLE articles ADD COLUMN IF NOT EXISTS "
+                "summary_generated_at TIMESTAMP WITH TIME ZONE"
+            )
+        )
+        connection.execute(
+            text("ALTER TABLE articles ADD COLUMN IF NOT EXISTS summary_error TEXT")
+        )
+        connection.execute(
+            text(
+                "UPDATE articles SET summary_status = 'completed', "
+                "summary_generated_at = COALESCE(summary_generated_at, created_at) "
+                "WHERE summary IS NOT NULL AND summary_status <> 'completed'"
+            )
+        )
+        connection.execute(
+            text(
+                "UPDATE articles SET summary_status = 'not_requested' "
+                "WHERE summary IS NULL AND summary_status IS NULL"
+            )
+        )
+        connection.execute(
+            text("ALTER TABLE articles ALTER COLUMN summary_status SET DEFAULT 'not_requested'")
+        )
+        connection.execute(
+            text("ALTER TABLE articles ALTER COLUMN summary_status SET NOT NULL")
+        )
+        connection.execute(text("ALTER TABLE articles ADD COLUMN IF NOT EXISTS importance VARCHAR"))
+        connection.execute(
+            text("ALTER TABLE articles ADD COLUMN IF NOT EXISTS importance_score DOUBLE PRECISION")
+        )
+        connection.execute(
+            text(
+                "ALTER TABLE articles ADD COLUMN IF NOT EXISTS "
+                "classification_confidence DOUBLE PRECISION"
+            )
+        )
+        connection.execute(
+            text(
                 "ALTER TABLE articles ADD COLUMN IF NOT EXISTS source_id INTEGER "
                 "REFERENCES sources(id)"
             )

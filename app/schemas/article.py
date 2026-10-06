@@ -17,6 +17,23 @@ ArticleCategory = Literal[
     "entertainment",
     "other",
 ]
+ArticleLanguage = Literal["ar", "en", "other"]
+ArticleTopic = Literal[
+    "artificial_intelligence",
+    "software",
+    "startups",
+    "cybersecurity",
+    "finance",
+    "markets",
+    "government",
+    "geopolitics",
+    "middle_east",
+    "science",
+    "health",
+    "football",
+    "other",
+]
+ArticleImportance = Literal["low", "medium", "high", "critical"]
 
 
 class Article(BaseModel):
@@ -34,8 +51,14 @@ class ArticleRead(Article):
     id: int
     category: str | None = None
     topics: list[str] | None = None
+    importance: str | None = None
+    importance_score: float | None = None
+    classification_confidence: float | None = None
     summary: str | None = None
     key_points: list[str] | None = None
+    summary_status: str = "not_requested"
+    summary_requested_at: datetime | None = None
+    summary_generated_at: datetime | None = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -51,12 +74,19 @@ class ArticleFetchResult(BaseModel):
     ai_processing_started: bool = False
 
 
-class ArticleAnalysis(BaseModel):
-    language: str
+class ArticleClassification(BaseModel):
+    language: ArticleLanguage
     category: ArticleCategory
-    topics: list[str]
+    primary_topic: ArticleTopic
+    secondary_topic: ArticleTopic | Literal["none"]
+    importance: ArticleImportance
+    importance_score: float = Field(ge=0.0, le=1.0)
+    confidence: float = Field(ge=0.0, le=1.0)
+
+
+class ArticleSummary(BaseModel):
     summary: str
-    key_points: list[str]
+    key_points: list[str] = Field(min_length=1, max_length=3)
 
 
 class Preferences(BaseModel):

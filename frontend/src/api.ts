@@ -1,21 +1,3 @@
-export type FeedArticle = {
-  id: number;
-  source_id: number | null;
-  title: string;
-  url: string;
-  source: string;
-  language: string | null;
-  summary: string | null;
-  category: string | null;
-  topics: string[] | null;
-  published_at: string | null;
-  score: number;
-  ai_relevance: number;
-  freshness_score: number;
-  topic_match_score: number;
-  reason: string;
-};
-
 export type ArticleDetails = {
   id: number;
   source_id: number | null;
@@ -28,15 +10,25 @@ export type ArticleDetails = {
   published_at: string | null;
   category: string | null;
   topics: string[] | null;
+  importance: string | null;
+  importance_score: number | null;
+  classification_confidence: number | null;
   summary: string | null;
   key_points: string[] | null;
+  summary_status: string;
+  summary_requested_at: string | null;
+  summary_generated_at: string | null;
   created_at: string;
 };
 
-export type FeedRequest = {
-  topics: string[];
-  languages: string[];
-  max_articles: number;
+export type ArticleFetchResult = {
+  fetched: number;
+  saved: number;
+  duplicates: number;
+  content_updated: number;
+  classified: number;
+  summarized: number;
+  ai_processing_started: boolean;
 };
 
 export type User = {
@@ -177,25 +169,31 @@ export async function fetchCurrentUser(): Promise<User> {
   return response.json();
 }
 
-export async function fetchFeed(request: FeedRequest): Promise<FeedArticle[]> {
-  const response = await authFetch("/feed", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(request),
-  });
+export async function fetchArticles(): Promise<ArticleDetails[]> {
+  const response = await authFetch("/articles");
 
   if (!response.ok) {
-    throw new Error("Could not load personalized feed");
+    throw new Error("Could not load saved articles");
   }
 
   return response.json();
 }
 
-export async function fetchArticle(articleId: number): Promise<ArticleDetails> {
-  const response = await authFetch(`/articles/${articleId}`);
+export async function scanSources(): Promise<ArticleFetchResult> {
+  const response = await authFetch("/articles/fetch", { method: "POST" });
 
   if (!response.ok) {
-    throw new Error("Could not load article details");
+    throw new Error(await getErrorMessage(response, "Could not scan subscribed sources"));
+  }
+
+  return response.json();
+}
+
+export async function generateArticleSummary(articleId: number): Promise<ArticleDetails> {
+  const response = await authFetch(`/articles/${articleId}/summary`, { method: "POST" });
+
+  if (!response.ok) {
+    throw new Error(await getErrorMessage(response, "Could not generate summary"));
   }
 
   return response.json();
