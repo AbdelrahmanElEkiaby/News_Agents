@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     jwt_secret_key: str
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 1440
+    cors_origins: str = "http://127.0.0.1:5173,http://localhost:5173"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
@@ -22,6 +23,14 @@ class Settings(BaseSettings):
             return database_url.replace("postgresql://", "postgresql+psycopg://", 1)
 
         return database_url
+
+    @property
+    def allowed_cors_origins(self) -> list[str]:
+        return [
+            origin.strip().rstrip("/")
+            for origin in self.cors_origins.split(",")
+            if origin.strip()
+        ]
 
 
 settings = Settings()

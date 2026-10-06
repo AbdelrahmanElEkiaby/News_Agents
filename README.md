@@ -178,9 +178,17 @@ NEWS_FETCH_INTERVAL_MINUTES=30
 JWT_SECRET_KEY=replace-with-a-random-secret
 JWT_ALGORITHM=HS256
 ACCESS_TOKEN_EXPIRE_MINUTES=1440
+CORS_ORIGINS=http://127.0.0.1:5173,http://localhost:5173
 ```
 
 Generate a local JWT signing secret with `openssl rand -hex 32` and place it in `.env`.
+
+For production, set `CORS_ORIGINS` to the public frontend URL. Multiple frontend URLs can
+be provided as a comma-separated list. Do not include a trailing slash:
+
+```env
+CORS_ORIGINS=https://your-news-agent.onrender.com
+```
 
 ## Setup
 
