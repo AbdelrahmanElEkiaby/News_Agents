@@ -46,6 +46,7 @@ export type AuthResponse = {
 
 export type Source = {
   id: number;
+  owner_user_id: number | null;
   name: string;
   website_url: string | null;
   feed_url: string | null;

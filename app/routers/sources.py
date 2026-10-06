@@ -4,6 +4,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.models.source import SourceDB
+from app.models.user import UserDB
 from app.schemas.source import (
     SourceCreate,
     SourceDiscoverRequest,
@@ -64,6 +66,7 @@ async def discover_source(source_data: SourceDiscoverRequest):
 @router.post("/from-website", response_model=SourceRead)
 async def create_source_from_website(
     source_data: SourceWebsiteCreate,
+    current_user: UserDB = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     website_url = normalize_website_url(source_data.url)
@@ -86,6 +89,7 @@ async def create_source_from_website(
             feed_url=recommended_feed.feed_url,
             language=source_data.language,
         ),
+        owner_user_id=current_user.id,
     )
 
 
@@ -100,7 +104,11 @@ def read_source(source_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("", response_model=SourceRead)
-async def create_new_source(source_data: SourceCreate, db: Session = Depends(get_db)):
+async def create_new_source(
+    source_data: SourceCreate,
+    current_user: UserDB = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     feed_url = normalize_website_url(source_data.feed_url or "")
 
     if not await validate_feed_url(feed_url):
@@ -111,19 +119,22 @@ async def create_new_source(source_data: SourceCreate, db: Session = Depends(get
     if get_source_by_feed_url(db, feed_url) is not None:
         raise HTTPException(status_code=400, detail="A source with this feed URL already exists")
 
-    return create_source(db, source_data)
+    return create_source(db, source_data, owner_user_id=current_user.id)
 
 
 @router.patch("/{source_id}", response_model=SourceRead)
 async def update_existing_source(
     source_id: int,
     source_data: SourceUpdate,
+    current_user: UserDB = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     source = get_source_by_id(db, source_id)
 
     if source is None:
         raise HTTPException(status_code=404, detail="Source not found")
+
+    require_source_owner(source, current_user)
 
     updated_feed_url = source.feed_url
 
@@ -147,13 +158,26 @@ async def update_existing_source(
 
 
 @router.delete("/{source_id}", response_model=SourceRead)
-def delete_source(source_id: int, db: Session = Depends(get_db)):
+def delete_source(
+    source_id: int,
+    current_user: UserDB = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     source = get_source_by_id(db, source_id)
 
     if source is None:
         raise HTTPException(status_code=404, detail="Source not found")
 
+    require_source_owner(source, current_user)
     return disable_source(db, source)
+
+
+def require_source_owner(source: SourceDB, current_user: UserDB) -> None:
+    if source.owner_user_id != current_user.id:
+        raise HTTPException(
+            status_code=403,
+            detail="Only the source owner can modify this source",
+        )
 
 
 def get_name_from_url(url: str) -> str:

@@ -131,6 +131,30 @@ def add_missing_article_columns() -> None:
 
 def add_missing_source_columns() -> None:
     with get_engine().begin() as connection:
+        connection.execute(
+            text(
+                "ALTER TABLE sources ADD COLUMN IF NOT EXISTS owner_user_id INTEGER "
+                "REFERENCES users(id) ON DELETE SET NULL"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_sources_owner_user_id "
+                "ON sources (owner_user_id)"
+            )
+        )
+        connection.execute(
+            text(
+                "WITH first_subscribers AS ("
+                "SELECT DISTINCT ON (source_id) source_id, user_id "
+                "FROM user_sources ORDER BY source_id, created_at ASC, id ASC"
+                ") "
+                "UPDATE sources SET owner_user_id = first_subscribers.user_id "
+                "FROM first_subscribers "
+                "WHERE sources.id = first_subscribers.source_id "
+                "AND sources.owner_user_id IS NULL"
+            )
+        )
         connection.execute(text("ALTER TABLE sources ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true"))
         connection.execute(text("ALTER TABLE sources ADD COLUMN IF NOT EXISTS last_fetched_at TIMESTAMP WITH TIME ZONE"))
         connection.execute(text("ALTER TABLE sources ADD COLUMN IF NOT EXISTS last_success_at TIMESTAMP WITH TIME ZONE"))

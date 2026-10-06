@@ -30,8 +30,13 @@ def get_source_by_feed_url(db: Session, feed_url: str | None) -> SourceDB | None
     return db.query(SourceDB).filter(SourceDB.feed_url == feed_url).first()
 
 
-def create_source(db: Session, source_data: SourceCreate) -> SourceDB:
+def create_source(
+    db: Session,
+    source_data: SourceCreate,
+    owner_user_id: int,
+) -> SourceDB:
     source = SourceDB(
+        owner_user_id=owner_user_id,
         name=source_data.name,
         website_url=source_data.website_url,
         feed_url=source_data.feed_url,

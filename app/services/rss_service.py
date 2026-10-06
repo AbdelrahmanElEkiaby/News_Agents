@@ -8,8 +8,10 @@ import httpx
 from app.models.source import SourceDB
 from app.schemas.article import Article
 from app.services.article_content import extract_text_from_feed_html
+from app.services.safe_http import is_safe_http_url, safe_get
 
 logger = logging.getLogger(__name__)
+MAX_FEED_RESPONSE_BYTES = 2_000_000
 
 
 async def fetch_source(source: SourceDB) -> list[Article]:
@@ -43,11 +45,14 @@ async def fetch_rss_articles(
 
     async with httpx.AsyncClient(
         timeout=10.0,
-        follow_redirects=True,
+        follow_redirects=False,
         headers={"User-Agent": "NewsAgentLearningProject/1.0"},
     ) as client:
-        response = await client.get(feed_url)
-        response.raise_for_status()
+        response = await safe_get(
+            client,
+            feed_url,
+            max_response_bytes=MAX_FEED_RESPONSE_BYTES,
+        )
         parsed_feed = feedparser.parse(response.content)
 
     if parsed_feed.bozo:
@@ -78,8 +83,11 @@ def parse_rss_entry(
         title = clean_text(entry.get("title", ""))
         url = entry.get("link", "")
 
-        if not title or not url:
-            logger.warning("Skipping RSS entry from %s because title or URL is missing", source_name)
+        if not title or not url or not is_safe_http_url(url):
+            logger.warning(
+                "Skipping RSS entry from %s because its title or public URL is invalid",
+                source_name,
+            )
             return None
 
         description = clean_text(entry.get("summary") or entry.get("description") or "")

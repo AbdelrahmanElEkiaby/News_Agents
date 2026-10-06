@@ -1,7 +1,5 @@
 import asyncio
 import calendar
-import ipaddress
-import socket
 from datetime import datetime, timezone
 from urllib.parse import urljoin, urlparse
 
@@ -10,6 +8,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from app.schemas.source import DiscoveredFeed
+from app.services.safe_http import SafeRequestError, safe_get
 
 COMMON_FEED_PATHS = [
     "/feed",
@@ -216,46 +215,20 @@ async def fetch_url(
     if url in response_cache:
         return response_cache[url]
 
-    original_url = url
-    current_url = url
+    try:
+        response = await safe_get(
+            client,
+            url,
+            max_response_bytes=MAX_RESPONSE_BYTES,
+            max_redirects=MAX_REDIRECTS,
+        )
+    except (httpx.HTTPError, SafeRequestError):
+        response_cache[url] = None
+        return None
 
-    for _ in range(MAX_REDIRECTS + 1):
-        if not await is_safe_request_url(current_url):
-            response_cache[original_url] = None
-            return None
-
-        try:
-            response = await client.get(current_url)
-        except httpx.HTTPError:
-            response_cache[original_url] = None
-            return None
-
-        if response.is_redirect:
-            location = response.headers.get("location")
-
-            if not location:
-                response_cache[original_url] = None
-                return None
-
-            current_url = urljoin(current_url, location)
-            continue
-
-        try:
-            response.raise_for_status()
-        except httpx.HTTPError:
-            response_cache[original_url] = None
-            return None
-
-        if len(response.content) > MAX_RESPONSE_BYTES:
-            response_cache[original_url] = None
-            return None
-
-        response_cache[original_url] = response
-        response_cache[str(response.url)] = response
-        return response
-
-    response_cache[original_url] = None
-    return None
+    response_cache[url] = response
+    response_cache[str(response.url)] = response
+    return response
 
 
 def parse_feed_candidate(
@@ -412,53 +385,6 @@ def normalize_website_url(url: str) -> str:
         cleaned_url = f"https://{cleaned_url}"
 
     return cleaned_url
-
-
-def is_safe_http_url(url: str) -> bool:
-    parsed_url = urlparse(url)
-
-    if parsed_url.scheme not in ("http", "https") or not parsed_url.hostname:
-        return False
-
-    if parsed_url.username or parsed_url.password:
-        return False
-
-    hostname = parsed_url.hostname.lower()
-
-    if hostname == "localhost" or hostname.endswith((".localhost", ".local")):
-        return False
-
-    try:
-        address = ipaddress.ip_address(hostname)
-    except ValueError:
-        return True
-
-    return address.is_global
-
-
-async def is_safe_request_url(url: str) -> bool:
-    if not is_safe_http_url(url):
-        return False
-
-    hostname = urlparse(url).hostname
-
-    if hostname is None:
-        return False
-
-    try:
-        ipaddress.ip_address(hostname)
-        return True
-    except ValueError:
-        pass
-
-    try:
-        address_info = await asyncio.to_thread(socket.getaddrinfo, hostname, None)
-    except socket.gaierror:
-        return False
-
-    addresses = {item[4][0] for item in address_info}
-
-    return bool(addresses) and all(ipaddress.ip_address(address).is_global for address in addresses)
 
 
 def same_hostname(first_url: str, second_url: str) -> bool:

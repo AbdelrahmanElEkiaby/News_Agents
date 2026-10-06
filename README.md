@@ -87,6 +87,10 @@ This project is being built one phase at a time.
 - The frontend recommends one feed and shows a selector when a website has multiple feeds
 - Fetch failures are recorded on the source without stopping other sources
 - Source definitions come only from PostgreSQL; there is no startup source list
+- New sources record their creator as owner; only that owner can update or disable them
+- Other users can subscribe to shared sources without receiving source-management permissions
+- Outbound feed and article requests reject private, local, credentialed, and nonstandard-port URLs
+- Every outbound redirect is checked again and response bodies have strict size limits
 
 ```text
 Website

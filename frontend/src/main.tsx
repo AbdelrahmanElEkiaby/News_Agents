@@ -409,7 +409,12 @@ function App() {
         </>
       )}
 
-      {activeView === "sources" && <SourceManagementView onScanComplete={handleScanComplete} />}
+      {activeView === "sources" && (
+        <SourceManagementView
+          currentUserId={currentUser.id}
+          onScanComplete={handleScanComplete}
+        />
+      )}
     </main>
   );
 }
@@ -518,8 +523,10 @@ function getArticlePreview(article: ArticleDetails) {
 }
 
 function SourceManagementView({
+  currentUserId,
   onScanComplete,
 }: {
+  currentUserId: number;
   onScanComplete: (result: ArticleFetchResult) => Promise<void>;
 }) {
   const [sources, setSources] = React.useState<Source[]>([]);
@@ -814,6 +821,9 @@ function SourceManagementView({
                 {subscribedSourceIds.has(source.id) && (
                   <span className="status subscribed">Subscribed</span>
                 )}
+                {source.owner_user_id === currentUserId && (
+                  <span className="status owned">Owned by you</span>
+                )}
               </div>
               <p>
                 {source.source_type.toUpperCase()} - {source.language}
@@ -831,24 +841,28 @@ function SourceManagementView({
               >
                 {subscribedSourceIds.has(source.id) ? "Unsubscribe" : "Subscribe"}
               </button>
-              <button
-                aria-label={source.is_active ? "Disable source" : "Enable source"}
-                className="icon-button"
-                onClick={() => toggleSource(source)}
-                title={source.is_active ? "Disable source" : "Enable source"}
-                type="button"
-              >
-                {source.is_active ? <PowerOff size={17} /> : <Power size={17} />}
-              </button>
-              <button
-                aria-label="Delete source"
-                className="icon-button"
-                onClick={() => removeSource(source)}
-                title="Remove source (keeps existing articles)"
-                type="button"
-              >
-                <Trash2 size={17} />
-              </button>
+              {source.owner_user_id === currentUserId && (
+                <>
+                  <button
+                    aria-label={source.is_active ? "Disable source" : "Enable source"}
+                    className="icon-button"
+                    onClick={() => toggleSource(source)}
+                    title={source.is_active ? "Disable source" : "Enable source"}
+                    type="button"
+                  >
+                    {source.is_active ? <PowerOff size={17} /> : <Power size={17} />}
+                  </button>
+                  <button
+                    aria-label="Delete source"
+                    className="icon-button"
+                    onClick={() => removeSource(source)}
+                    title="Remove source (keeps existing articles)"
+                    type="button"
+                  >
+                    <Trash2 size={17} />
+                  </button>
+                </>
+              )}
             </div>
           </article>
         ))}

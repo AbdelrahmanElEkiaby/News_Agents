@@ -600,6 +600,11 @@ select {
   line-height: 1.45;
 }
 
+.status.owned {
+  background: #edf0f7;
+  color: #38466b;
+}
+
 .source-list {
   display: grid;
   gap: 10px;

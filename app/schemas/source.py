@@ -105,6 +105,7 @@ class SourceUpdate(BaseModel):
 
 class SourceRead(BaseModel):
     id: int
+    owner_user_id: int | None
     name: str
     website_url: str | None
     feed_url: str | None

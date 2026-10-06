@@ -5,18 +5,23 @@ import httpx
 from bs4 import BeautifulSoup
 
 from app.models.article import ArticleDB
+from app.services.safe_http import SafeRequestError, safe_get
 
 logger = logging.getLogger(__name__)
 
 MAX_CONTENT_LENGTH = 6000
+MAX_ARTICLE_RESPONSE_BYTES = 5_000_000
 MIN_PARAGRAPH_LENGTH = 40
 
 
 async def fetch_article_content(client: httpx.AsyncClient, url: str) -> str | None:
     try:
-        response = await client.get(url)
-        response.raise_for_status()
-    except httpx.HTTPError as error:
+        response = await safe_get(
+            client,
+            url,
+            max_response_bytes=MAX_ARTICLE_RESPONSE_BYTES,
+        )
+    except (httpx.HTTPError, SafeRequestError) as error:
         logger.warning("Could not fetch article content from %s: %s", url, error)
         return None
 
@@ -34,7 +39,7 @@ async def fetch_article_contents(
 
     async with httpx.AsyncClient(
         timeout=10.0,
-        follow_redirects=True,
+        follow_redirects=False,
         headers={"User-Agent": "NewsAgentLearningProject/1.0"},
     ) as client:
 
