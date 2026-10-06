@@ -85,7 +85,9 @@ export type SourceCreateInput = {
   source_type: "rss";
 };
 
-const API_URL = import.meta.env.VITE_API_URL ?? "http://127.0.0.1:8000";
+const API_URL = (
+  import.meta.env.VITE_API_URL ?? "http://127.0.0.1:8000"
+).replace(/\/+$/, "");
 const TOKEN_KEY = "news_agent_access_token";
 
 export function getStoredToken(): string | null {
